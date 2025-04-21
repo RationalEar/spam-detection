@@ -3,6 +3,12 @@ import pickle
 import tarfile
 import urllib.request
 
+import pandas as pd
+from torch.utils.data import DataLoader
+from transformers import BertTokenizer
+
+from utils.EmailDataset import EmailDataset
+
 datasets = [
     ("easy_ham", "https://spamassassin.apache.org/old/publiccorpus/20030228_easy_ham.tar.bz2"),
     ("easy_ham_2", "https://spamassassin.apache.org/old/publiccorpus/20030228_easy_ham_2.tar.bz2"),
@@ -28,7 +34,7 @@ def download_datasets():
         # Extract with folder structure preservation
         with tarfile.open(file_path, "r:bz2") as tar:
             tar.extractall("data/raw")
-        
+
 
 def load_data():
     # Load from pickle (faster)
@@ -40,3 +46,31 @@ def load_data():
     X_train, y_train = train_df["text"].tolist(), train_df["label"].tolist()
     X_test, y_test = test_df["text"].tolist(), test_df["label"].tolist()
     return X_train, X_test, y_train, y_test
+
+
+def load_datasets(tokenizer):
+    # Load preprocessed data (from Section 3.2)
+    train_df = pd.read_pickle('data/processed/train.pkl')
+    test_df = pd.read_pickle('data/processed/test.pkl')
+    
+    # Create datasets
+    train_dataset = EmailDataset(train_df['text'], train_df['label'], tokenizer)
+    test_dataset = EmailDataset(test_df['text'], test_df['label'], tokenizer)
+    
+    return train_dataset, test_dataset
+
+
+def get_test_loader(batch_size=32, shuffle=False):
+    """Create test DataLoader with consistent parameters"""
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    test_df = pd.read_pickle('data/processed/test.pkl')
+    test_dataset = EmailDataset(test_df['text'], test_df['label'], tokenizer)
+    return DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle)
+
+
+def get_train_loader(batch_size=32, shuffle=True):
+    """Create training DataLoader with consistent parameters"""
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    train_df = pd.read_pickle('data/processed/train.pkl')
+    train_dataset = EmailDataset(train_df['text'], train_df['label'], tokenizer)
+    return DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
