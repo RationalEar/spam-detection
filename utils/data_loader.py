@@ -60,17 +60,17 @@ def load_datasets(tokenizer):
     return train_dataset, test_dataset
 
 
-def get_test_loader(batch_size=32, shuffle=False):
+def get_test_loader(batch_size=32, shuffle=False, dir_root=''):
     """Create test DataLoader with consistent parameters"""
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    test_df = pd.read_pickle('data/processed/test.pkl')
+    test_df = pd.read_pickle(dir_root + 'data/processed/test.pkl')
     test_dataset = EmailDataset(test_df['text'], test_df['label'], tokenizer)
     return DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle)
 
 
-def get_train_loader(batch_size=32, shuffle=True):
+def get_train_loader(batch_size=32, shuffle=True, dir_root=''):
     """Create training DataLoader with consistent parameters"""
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    train_df = pd.read_pickle('data/processed/train.pkl')
+    train_df = pd.read_pickle(dir_root + 'data/processed/train.pkl')
     train_dataset = EmailDataset(train_df['text'], train_df['label'], tokenizer)
     return DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)

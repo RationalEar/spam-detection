@@ -1,9 +1,15 @@
+import os
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
 from sklearn.metrics import confusion_matrix
 
+
 def plot_metrics(train_losses, val_accuracies):
+    if not os.path.exists('images'):
+        os.makedirs('images')
+    
     plt.figure(figsize=(12, 5))
     
     # Plot training loss
@@ -27,6 +33,8 @@ def plot_metrics(train_losses, val_accuracies):
 
 
 def plot_confusion_matrix(model, dataloader):
+    if not os.path.exists('images'):
+        os.makedirs('images')
     model.eval()
     all_preds = []
     all_labels = []
