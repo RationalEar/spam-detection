@@ -18,3 +18,10 @@ def evaluate(model, dataloader, device):
             correct += (predicted == labels).sum().item()
     
     return 100 * correct / total
+
+
+def check_data_integrity(df):
+    print(f"Total samples: {len(df)}")
+    print(f"Missing values:\n{df.isnull().sum()}")
+    print(f"Index range: {df.index.min()} to {df.index.max()}")
+    print(f"Index continuity check: {(df.index == range(len(df))).all()}")

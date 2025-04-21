@@ -2,8 +2,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
 from sklearn.metrics import confusion_matrix
-from torch.cuda import device
-
 
 def plot_metrics(train_losses, val_accuracies):
     plt.figure(figsize=(12, 5))
@@ -24,7 +22,7 @@ def plot_metrics(train_losses, val_accuracies):
     plt.ylabel('Accuracy (%)')
     plt.legend()
     
-    plt.savefig('training_metrics.png')
+    plt.savefig('images/training_metrics.png')
     plt.show()
 
 
@@ -32,7 +30,7 @@ def plot_confusion_matrix(model, dataloader):
     model.eval()
     all_preds = []
     all_labels = []
-    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     with torch.no_grad():
         for batch in dataloader:
             inputs = batch['input_ids'].to(device)
@@ -49,7 +47,7 @@ def plot_confusion_matrix(model, dataloader):
                 yticklabels=['Ham', 'Spam'])
     plt.xlabel('Predicted')
     plt.ylabel('Actual')
-    plt.savefig('confusion_matrix.png')
+    plt.savefig('images/confusion_matrix.png')
     plt.show()
 
 

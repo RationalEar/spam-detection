@@ -42,6 +42,9 @@ def train_model(train_df, test_df, batch_size=32, epochs=10, learning_rate=1e-3)
         epoch_loss = 0
         
         for batch in train_loader:
+            # Skip batches with invalid labels
+            if (batch['label'] == -1).any():
+                continue
             inputs = batch['input_ids'].to(device)
             labels = batch['label'].to(device)
             

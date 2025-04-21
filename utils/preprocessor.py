@@ -50,8 +50,9 @@ def create_dataset():
                     "label": label,
                     "source": dataset  # Track origin
                 })
-    
-    return pd.DataFrame(data)
+    df = pd.DataFrame(data)
+    df = df.reset_index(drop=True)
+    return df
 
 
 def prepare_data():
