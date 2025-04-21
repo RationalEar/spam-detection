@@ -1,3 +1,5 @@
+import os
+
 import torch
 from torch import optim, nn
 from torch.utils.data import DataLoader
@@ -19,7 +21,8 @@ def train_model(train_df, test_df, batch_size=32, epochs=10, learning_rate=1e-3)
     test_dataset = EmailDataset(test_df['text'], test_df['label'], tokenizer)
     
     # DataLoaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    num_workers = min(os.cpu_count(), len(train_dataset))
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     test_loader = DataLoader(test_dataset, batch_size=batch_size)
     
     # Model (using CNN with Attention)
