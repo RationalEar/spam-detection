@@ -3,4 +3,5 @@
 __pycache__
 /data
 /images/
+/saved_models/
 /.env
