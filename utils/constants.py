@@ -20,8 +20,9 @@ elif platform.system() == "Windows" and os.path.exists(windows_path):
 elif platform.system() == "Linux" and os.path.exists(linux_path):
     DATA_PATH = linux_path
 
+MODEL_SAVE_PATH = os.path.join(DATA_PATH, "trained-models")
+
 print("DATA_PATH:", DATA_PATH)
 print("WORKSPACE_DIR:", WORKSPACE_DIR)
 
-MODEL_SAVE_PATH = os.path.join(DATA_PATH, "trained-models")
 os.makedirs(MODEL_SAVE_PATH, exist_ok=True)
