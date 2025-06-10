@@ -21,8 +21,6 @@ elif platform.system() == "Linux" and os.path.exists(linux_path):
     DATA_PATH = linux_path
 
 MODEL_SAVE_PATH = os.path.join(DATA_PATH, "trained-models")
-
-print("DATA_PATH:", DATA_PATH)
-print("WORKSPACE_DIR:", WORKSPACE_DIR)
+GLOVE_PATH = os.path.join(DATA_PATH, 'data/raw/glove.6B/glove.6B.300d.txt')
 
 os.makedirs(MODEL_SAVE_PATH, exist_ok=True)
