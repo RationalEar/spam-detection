@@ -92,52 +92,90 @@ def create_dataset():
                 if reply_to_email:
                     email_hash_dict[reply_to_email] = reply_to_hash
 
-                raw_email = f"{parsed['subject']} {parsed['body']}"
+                raw_email = f"<SUBJECT>{parsed['subject']}</SUBJECT> <BODY>{parsed['body']}</BODY>"
                 data.append({
+                    "subject": parsed["subject"],
                     "text": preprocess_text(raw_email),
                     "label": label,
                     "source": dataset,  # Track origin
                     "sender_hash": sender_hash,
-                    "reply_to_hash": reply_to_hash
+                    "reply_to_hash": reply_to_hash,
+                    "date": parsed.get("date", "")  # Store the date for temporal split
                 })
     df = pd.DataFrame(data)
     df = df.reset_index(drop=True)
     return df, email_hash_dict
 
 
+def parse_email_date(date_str):
+    # Try to parse the date string into a sortable offset-naive UTC datetime object
+    from email.utils import parsedate_to_datetime
+    import pandas as pd
+    try:
+        dt = parsedate_to_datetime(date_str)
+        if dt is None:
+            return pd.Timestamp.min
+        # Convert to UTC and remove tzinfo to make offset-naive
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(tz=None).replace(tzinfo=None)
+        return pd.Timestamp(dt)
+    except Exception:
+        return pd.Timestamp.min
+
+
+def temporal_stratified_split(df, stratify_col="label", date_col="date"):
+    # Split each class by time (date order) into 80/10/10
+    train_idx, val_idx, test_idx = [], [], []
+    for label in df[stratify_col].unique():
+        class_df = df[df[stratify_col] == label].copy()
+        # Parse dates for sorting (all offset-naive)
+        class_df["_parsed_date"] = class_df[date_col].apply(parse_email_date)
+        # Sort by parsed date, fallback to index if date missing
+        class_df = class_df.sort_values(by=["_parsed_date", date_col, "text"])
+        n = len(class_df)
+        n_train = int(n * 0.8)
+        n_val = int(n * 0.1)
+        idx = class_df.index.tolist()
+        train_idx += idx[:n_train]
+        val_idx += idx[n_train:n_train + n_val]
+        test_idx += idx[n_train + n_val:]
+    return (
+        df.loc[train_idx].reset_index(drop=True),
+        df.loc[val_idx].reset_index(drop=True),
+        df.loc[test_idx].reset_index(drop=True)
+    )
+
+
 def prepare_data():
     if not os.path.exists(f"{DATA_PATH}/data/processed/train.pkl"):
         df, email_hash_dict = create_dataset()
 
-        # Verify counts match original description
         print(f"\nDataset counts:")
         print(df["source"].value_counts())
 
-        # Stratified split (preserve class balance)
-        train_df, test_df = train_test_split(
-            df,
-            test_size=0.2,
-            stratify=df["label"],
-            random_state=42
-        )
+        # Stratified temporal split 80/10/10
+        train_df, val_df, test_df = temporal_stratified_split(df, stratify_col="label", date_col="date")
         print(f"Spam ratio: {df['label'].mean():.2%}")
 
         # Save data
         os.makedirs(f"{DATA_PATH}/data/processed", exist_ok=True)
         train_df.to_csv(f"{DATA_PATH}/data/processed/train.csv", index=False)
+        val_df.to_csv(f"{DATA_PATH}/data/processed/val.csv", index=False)
         test_df.to_csv(f"{DATA_PATH}/data/processed/test.csv", index=False)
 
         with open(f"{DATA_PATH}/data/processed/train.pkl", "wb") as f:
             pickle.dump(train_df, f)
+        with open(f"{DATA_PATH}/data/processed/val.pkl", "wb") as f:
+            pickle.dump(val_df, f)
         with open(f"{DATA_PATH}/data/processed/test.pkl", "wb") as f:
             pickle.dump(test_df, f)
-        # Save the email hash dictionary
         with open(f"{DATA_PATH}/data/processed/email_hash_dict.pkl", "wb") as f:
             pickle.dump(email_hash_dict, f)
     else:
         print("Data already prepared. Loading from disk...")
         train_df = pd.read_csv(f"{DATA_PATH}/data/processed/train.csv")
+        val_df = pd.read_csv(f"{DATA_PATH}/data/processed/val.csv")
         test_df = pd.read_csv(f"{DATA_PATH}/data/processed/test.csv")
 
     print("\nData preparation complete!")
-    print(f"Train: {len(train_df)}, Test: {len(test_df)}, Total: {len(train_df) + len(test_df)}")
+    print(f"Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}, Total: {len(train_df) + len(val_df) + len(test_df)}")

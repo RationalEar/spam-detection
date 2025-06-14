@@ -34,6 +34,7 @@ def parse_email(file_path):
         sender_domain = sender_email.split('@')[-1] if sender_email else ""
         reply_to = msg.get("Reply-To", "")
         reply_to_email = extract_email_address(reply_to)
+        date = msg.get("Date", "")  # Extract the Date header
 
         body = ""
         if msg.is_multipart():
@@ -52,7 +53,8 @@ def parse_email(file_path):
             "sender": sender,
             "sender_domain": sender_domain,
             "reply_to": reply_to_email,
-            "body": body
+            "body": body,
+            "date": date  # Add date to output
         }
     except Exception as e:
         print(f"Error parsing {file_path}: {str(e)}")
