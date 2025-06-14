@@ -1,0 +1,12 @@
+# .dockerignore
+.git
+.venv
+__pycache__
+*.pyc
+*.bak
+*.swp
+data/
+models/
+.idea/
+.vscode/
+venv/

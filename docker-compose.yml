@@ -1,0 +1,14 @@
+services:
+  app:
+    build:
+      context: . # Build from the current directory
+      dockerfile: Dockerfile # Use the Dockerfile we just created
+    ports:
+      - "8888:8888" # Map host port 8888 to container port 8888 for Jupyter
+    volumes:
+      - .:/app # Mount your local project directory into the container
+      - D:\\projects\\spam-detection-data:/data # Mount the data directory
+    command: jupyter # Default command to start Jupyter Lab
+    # For production, you'd add environment variables for authentication
+    # environment:
+    #   JUPYTER_TOKEN: your_secret_token

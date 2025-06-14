@@ -4,7 +4,7 @@ import platform
 
 GIT_REPOSITORY = "https://github.com/RationalEar/spam-detection.git"
 IS_COLAB = False
-DATA_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
+DATA_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "/", "data"))
 WORKSPACE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 colab_path = "/content/drive/MyDrive/Projects/spam-detection-data"
