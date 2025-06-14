@@ -320,7 +320,7 @@ def compute_explanation_metrics(model, x, cam_maps, num_perturbations=10):
 
             with torch.no_grad():
                 # Ensure x_perturbed_single is LongTensor for embedding layer
-                cam_perturbed_single = model.grad_cam_auto(x_perturbed_single.unsqueeze(0).long())[0]
+                cam_perturbed_single = model.grad_cam(x_perturbed_single.unsqueeze(0).long())[0]
 
             # Jaccard
             k_orig = min(k_top_features, current_cam_original.numel())
