@@ -1,13 +1,9 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import spacy
 import torch
-import matplotlib.pyplot as plt
 from lime.lime_text import LimeTextExplainer
-import copy
 from sklearn.metrics import auc
-from collections import Counter
-import pandas as pd
-from scipy.spatial.distance import jaccard
 
 # Load SpaCy model (you might need to download it first: python -m spacy download en_core_web_sm)
 try:
@@ -15,9 +11,14 @@ try:
 except OSError:
     print("SpaCy model 'en_core_web_sm' not found. Downloading...")
     import subprocess
-    
+
     subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
     nlp = spacy.load("en_core_web_sm")
+
+
+def tokenizer_spacy(text):
+    """Custom SpaCy tokenizer for LIME."""
+    return [token.text for token in nlp(text)]
 
 
 class LIMETextExplanationWrapper:
@@ -26,39 +27,35 @@ class LIMETextExplanationWrapper:
     LIME expects a predict_proba function that takes a list of raw strings
     and returns a numpy array of probabilities for each class.
     """
-    
+
     def __init__(self, model, word_to_idx, idx_to_word, device='cpu'):
         self.model = model
         self.word_to_idx = word_to_idx
         self.idx_to_word = idx_to_word
         self.device = device
         self.model.eval()  # Ensure the model is in evaluation mode
-    
-    def tokenizer_spacy(self, text):
-        """Custom SpaCy tokenizer for LIME."""
-        return [token.text for token in nlp(text)]
-    
+
     def _text_to_sequence(self, texts):
         """Converts a list of text strings to a sequence of token IDs."""
         sequences = []
         max_seq_len = 0  # Determine max_seq_len dynamically or set a fixed one
-        
+
         # First pass to tokenize and find max_seq_len if not fixed
         tokenized_texts = []
         for text in texts:
-            tokens = self.tokenizer_spacy(text)
+            tokens = tokenizer_spacy(text)
             tokenized_texts.append(tokens)
             max_seq_len = max(max_seq_len, len(tokens))
-        
+
         # Second pass to convert to IDs and pad
         for tokens in tokenized_texts:
             indexed_tokens = [self.word_to_idx.get(word, self.word_to_idx['<UNK>']) for word in tokens]
             # Pad sequences to max_seq_len. Assuming 0 is the PAD token ID.
             padded_sequence = indexed_tokens + [self.word_to_idx.get('<PAD>', 0)] * (max_seq_len - len(indexed_tokens))
             sequences.append(padded_sequence)
-        
+
         return torch.tensor(sequences, dtype=torch.long, device=self.device)
-    
+
     def predict_proba(self, texts):
         """
         LIME's required predict_proba function.
@@ -66,7 +63,7 @@ class LIMETextExplanationWrapper:
         probabilities for spam (class 1) and not-spam (class 0).
         """
         sequences = self._text_to_sequence(texts)
-        
+
         with torch.no_grad():
             outputs = self.model(sequences)
             # The model outputs a single probability for spam.
@@ -93,15 +90,15 @@ def get_lime_explanation(model, original_text, word_to_idx, idx_to_word, num_fea
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
-    
+
     # Create the wrapper for LIME
     explainer_wrapper = LIMETextExplanationWrapper(model, word_to_idx, idx_to_word, str(device))
-    
+
     # Initialize LimeTextExplainer with the custom tokenizer
     explainer = LimeTextExplainer(
         class_names=["ham", "spam"]
     )
-    
+
     # Generate explanation
     # Specify 'ridge' as the kernel_estimator and set alpha
     explanation = explainer.explain_instance(
@@ -119,7 +116,7 @@ def get_lime_explanation(model, original_text, word_to_idx, idx_to_word, num_fea
         # A common workaround or understanding is that it uses a default Ridge,
         # or if you need a specific alpha, you might need to create a custom kernel_estimator.
         # However, LIME's `explain_instance` takes `model_regressor` argument for this.
-        
+
         # Let's use a workaround to set alpha for Ridge.
         # The default behavior of LIME is often to use Ridge Regression.
         # To pass alpha, we need to import Ridge and pass it as model_regressor.
@@ -154,7 +151,7 @@ def plot_lime_explanation(explanation_data, title="LIME Explanation"):
     colors = ['blue' if w >= 0 else 'red' for w in weights]
 
     # Create the horizontal bar chart
-    fig, ax = plt.subplots(figsize=(10, len(features) * 0.4 + 2)) # Adjust figure size dynamically
+    fig, ax = plt.subplots(figsize=(10, len(features) * 0.4 + 2))  # Adjust figure size dynamically
 
     # Use barh for horizontal bars
     # Invert y-axis to have the most important feature at the top
@@ -204,28 +201,28 @@ def compute_auc_deletion(model_wrapper, explanation, text, steps=20, embedding_t
     original_pred = model_wrapper.predict_proba([text])[0]
     original_class = np.argmax(original_pred)
     original_prob = original_pred[original_class]
-    
+
     # Get features sorted by absolute importance
     features_and_weights = explanation.as_list()
     features_and_weights.sort(key=lambda x: abs(x[1]), reverse=True)
     features = [f[0] for f in features_and_weights]
-    
+
     # Normalize indices to number of steps
     max_features = min(len(features), 100)  # Avoid too many steps
     indices = np.linspace(0, max_features, num=steps, dtype=int)
-    
+
     probs = []
     remaining_text = text
     already_removed = set()
-    
+
     # Baseline: no deletion
     probs.append(original_prob)
-    
+
     # Iteratively remove features
     for i in range(1, len(indices)):
         num_to_remove = indices[i]
         features_to_remove = features[:num_to_remove]
-        
+
         # For text, we need to replace or remove the important words
         modified_text = text
         for feature in features_to_remove:
@@ -235,7 +232,7 @@ def compute_auc_deletion(model_wrapper, explanation, text, steps=20, embedding_t
                 # proper tokenization and avoid partial replacements
                 modified_text = modified_text.replace(feature, "")
                 already_removed.add(feature)
-        
+
         # Get prediction after removal
         if modified_text.strip():  # Ensure text is not empty
             new_pred = model_wrapper.predict_proba([modified_text])[0]
@@ -243,10 +240,10 @@ def compute_auc_deletion(model_wrapper, explanation, text, steps=20, embedding_t
         else:
             # If all text is removed, assume random prediction
             probs.append(0.5)  # Binary case; use 1/num_classes for multiclass
-    
+
     # Normalize x-axis from 0 to 1
     x = np.linspace(0, 1, len(probs))
-    
+
     # Calculate AUC
     auc_value = auc(x, probs)
     return auc_value
@@ -273,24 +270,24 @@ def compute_auc_insertion(model_wrapper, explanation, text, steps=20, embedding_
     original_pred = model_wrapper.predict_proba([text])[0]
     original_class = np.argmax(original_pred)
     original_prob = original_pred[original_class]
-    
+
     # Get features sorted by absolute importance
     features_and_weights = explanation.as_list()
     features_and_weights.sort(key=lambda x: abs(x[1]), reverse=True)
     features = [f[0] for f in features_and_weights]
-    
+
     # Normalize indices to number of steps
     max_features = min(len(features), 100)  # Avoid too many steps
     indices = np.linspace(0, max_features, num=steps, dtype=int)
-    
+
     # For text, we need to progressively reconstruct the document
     # Start with an empty document
     probs = []
-    
+
     # Baseline: empty text gives random prediction
     # For binary classification, this would be 0.5
     probs.append(0.5)  # empty text
-    
+
     # Create a mapping of tokens to their positions in original text
     # This is a simplified approach; in practice, use proper tokenization
     feature_positions = {}
@@ -299,21 +296,21 @@ def compute_auc_insertion(model_wrapper, explanation, text, steps=20, embedding_
         if token not in feature_positions:
             feature_positions[token] = []
         feature_positions[token].append(i)
-    
+
     # Track the tokens we've already used
     tokens_included = [False] * len(tokens)
-    
+
     # Iteratively add features
     for i in range(1, len(indices)):
         num_to_add = indices[i]
         features_to_add = features[:num_to_add]
-        
+
         # Mark tokens as included
         for feature in features_to_add:
             if feature in feature_positions:
                 for pos in feature_positions[feature]:
                     tokens_included[pos] = True
-        
+
         # Reconstruct text with only included tokens
         reconstructed_tokens = []
         for i, token in enumerate(tokens):
@@ -321,9 +318,9 @@ def compute_auc_insertion(model_wrapper, explanation, text, steps=20, embedding_
                 reconstructed_tokens.append(token)
             else:
                 reconstructed_tokens.append("")
-        
+
         reconstructed_text = " ".join(t for t in reconstructed_tokens if t)
-        
+
         # Get prediction for reconstructed text
         if reconstructed_text.strip():  # Ensure text is not empty
             new_pred = model_wrapper.predict_proba([reconstructed_text])[0]
@@ -331,10 +328,10 @@ def compute_auc_insertion(model_wrapper, explanation, text, steps=20, embedding_
         else:
             # If text is empty, assume random prediction
             probs.append(0.5)  # Binary case
-    
+
     # Normalize x-axis from 0 to 1
     x = np.linspace(0, 1, len(probs))
-    
+
     # Calculate AUC
     auc_value = auc(x, probs)
     return auc_value
@@ -360,22 +357,22 @@ def compute_comprehensiveness(model_wrapper, explanation, text, k=5):
     original_pred = model_wrapper.predict_proba([text])[0]
     original_class = np.argmax(original_pred)
     original_prob = original_pred[original_class]
-    
+
     # Get top k features by absolute importance
     features_and_weights = explanation.as_list()
     features_and_weights.sort(key=lambda x: abs(x[1]), reverse=True)
     top_k_features = [f[0] for f in features_and_weights[:k]]
-    
+
     # Remove top k features
     modified_text = text
     for feature in top_k_features:
         modified_text = modified_text.replace(feature, "")
-    
+
     # Get prediction after removal
     if modified_text.strip():  # Ensure text is not empty
         modified_pred = model_wrapper.predict_proba([modified_text])[0]
         modified_prob = modified_pred[original_class]
-        
+
         # Comprehensiveness: Original probability - modified probability
         # Higher values indicate the removed features were more important
         return original_prob - modified_prob
@@ -404,29 +401,29 @@ def compute_jaccard_stability(model, texts, word_to_idx, idx_to_word, num_featur
     """
     if len(texts) < 2:
         return 1.0  # Perfect stability with only one text
-    
+
     # Get explanations for all texts
     explanations = []
     for text in texts:
         explanation = get_lime_explanation(
-            model, 
+            model,
             text,
             word_to_idx,
             idx_to_word,
             num_features=num_features,
             num_samples=num_samples
         )
-        
+
         # Extract top features
         features_and_weights = explanation.as_list()
         features_and_weights.sort(key=lambda x: abs(x[1]), reverse=True)
         top_features = set([f[0] for f in features_and_weights[:num_features]])
         explanations.append(top_features)
-    
+
     # Calculate pairwise Jaccard similarities
     similarities = []
     for i in range(len(explanations)):
-        for j in range(i+1, len(explanations)):
+        for j in range(i + 1, len(explanations)):
             # Jaccard similarity: intersection over union
             intersection = len(explanations[i].intersection(explanations[j]))
             union = len(explanations[i].union(explanations[j]))
@@ -435,7 +432,7 @@ def compute_jaccard_stability(model, texts, word_to_idx, idx_to_word, num_featur
             else:
                 similarity = 1.0  # Both sets empty, perfect similarity
             similarities.append(similarity)
-    
+
     # Return average stability
     return sum(similarities) / max(1, len(similarities))
 
@@ -453,36 +450,36 @@ def plot_deletion_insertion_curves(model_wrapper, explanation, text, steps=20):
     # Get the original prediction and probability for the most likely class
     original_pred = model_wrapper.predict_proba([text])[0]
     original_class = np.argmax(original_pred)
-    
+
     # Get features sorted by absolute importance
     features_and_weights = explanation.as_list()
     features_and_weights.sort(key=lambda x: abs(x[1]), reverse=True)
     features = [f[0] for f in features_and_weights]
-    
+
     # Normalize indices to number of steps
     max_features = min(len(features), 100)  # Avoid too many steps
     indices = np.linspace(0, max_features, num=steps, dtype=int)
-    
+
     # Calculate deletion curve
     deletion_probs = []
     remaining_text = text
     already_removed = set()
-    
+
     # Baseline: no deletion
     deletion_probs.append(original_pred[original_class])
-    
+
     # Iteratively remove features
     for i in range(1, len(indices)):
         num_to_remove = indices[i]
         features_to_remove = features[:num_to_remove]
-        
+
         # For text, we need to replace or remove the important words
         modified_text = text
         for feature in features_to_remove:
             if feature not in already_removed:
                 modified_text = modified_text.replace(feature, "")
                 already_removed.add(feature)
-        
+
         # Get prediction after removal
         if modified_text.strip():  # Ensure text is not empty
             new_pred = model_wrapper.predict_proba([modified_text])[0]
@@ -490,13 +487,13 @@ def plot_deletion_insertion_curves(model_wrapper, explanation, text, steps=20):
         else:
             # If all text is removed, assume random prediction
             deletion_probs.append(0.5)  # Binary case
-    
+
     # Calculate insertion curve
     insertion_probs = []
-    
+
     # Baseline: empty text gives random prediction
     insertion_probs.append(0.5)  # empty text
-    
+
     # Create a mapping of tokens to their positions in original text
     feature_positions = {}
     tokens = model_wrapper.tokenizer_spacy(text)
@@ -504,21 +501,21 @@ def plot_deletion_insertion_curves(model_wrapper, explanation, text, steps=20):
         if token not in feature_positions:
             feature_positions[token] = []
         feature_positions[token].append(i)
-    
+
     # Track the tokens we've already used
     tokens_included = [False] * len(tokens)
-    
+
     # Iteratively add features
     for i in range(1, len(indices)):
         num_to_add = indices[i]
         features_to_add = features[:num_to_add]
-        
+
         # Mark tokens as included
         for feature in features_to_add:
             if feature in feature_positions:
                 for pos in feature_positions[feature]:
                     tokens_included[pos] = True
-        
+
         # Reconstruct text with only included tokens
         reconstructed_tokens = []
         for i, token in enumerate(tokens):
@@ -526,9 +523,9 @@ def plot_deletion_insertion_curves(model_wrapper, explanation, text, steps=20):
                 reconstructed_tokens.append(token)
             else:
                 reconstructed_tokens.append("")
-        
+
         reconstructed_text = " ".join(t for t in reconstructed_tokens if t)
-        
+
         # Get prediction for reconstructed text
         if reconstructed_text.strip():  # Ensure text is not empty
             new_pred = model_wrapper.predict_proba([reconstructed_text])[0]
@@ -536,30 +533,30 @@ def plot_deletion_insertion_curves(model_wrapper, explanation, text, steps=20):
         else:
             # If text is empty, assume random prediction
             insertion_probs.append(0.5)  # Binary case
-    
+
     # Normalize x-axis from 0 to 1
     x = np.linspace(0, 1, len(deletion_probs))
-    
+
     # Calculate AUC values
     auc_deletion = auc(x, deletion_probs)
     auc_insertion = auc(x, insertion_probs)
-    
+
     # Plot both curves
     fig, ax = plt.subplots(figsize=(10, 6))
-    
+
     ax.plot(x, deletion_probs, 'r-', linewidth=2, label=f'Deletion (AUC={auc_deletion:.3f})')
     ax.plot(x, insertion_probs, 'b-', linewidth=2, label=f'Insertion (AUC={auc_insertion:.3f})')
-    
+
     # Add grid and labels
     ax.grid(True, linestyle='--', alpha=0.7)
     ax.set_xlabel('Fraction of Features', fontsize=12)
     ax.set_ylabel('Model Prediction Probability', fontsize=12)
     ax.set_title('Deletion and Insertion Curves', fontsize=14)
     ax.legend(fontsize=12)
-    
+
     plt.tight_layout()
     plt.show()
-    
+
     return auc_deletion, auc_insertion
 
 
@@ -572,10 +569,10 @@ def plot_metrics_across_samples(metrics_df):
     """
     # Prepare data for plotting
     metrics_to_plot = ['AUC-Del', 'AUC-Ins', 'Comprehensiveness', 'Jaccard Stability']
-    
+
     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
     axs = axs.flatten()
-    
+
     for i, metric in enumerate(metrics_to_plot):
         if metric in metrics_df.columns:
             # Create bar plot
@@ -583,21 +580,21 @@ def plot_metrics_across_samples(metrics_df):
             axs[i].set_title(f'{metric} Across Samples', fontsize=14)
             axs[i].set_xlabel('Sample Index', fontsize=12)
             axs[i].set_ylabel(metric, fontsize=12)
-            
+
             # Add gridlines
             axs[i].grid(True, linestyle='--', alpha=0.7, axis='y')
-            
+
             # Rotate x-tick labels if many samples
             if len(metrics_df) > 10:
                 axs[i].set_xticks(metrics_df.index)
                 axs[i].set_xticklabels(metrics_df.index, rotation=45)
-            
+
             # Add mean line
             mean_val = metrics_df[metric].mean()
             axs[i].axhline(y=mean_val, color='r', linestyle='-')
-            axs[i].text(0.02, 0.95, f'Mean: {mean_val:.3f}', 
-                      transform=axs[i].transAxes, fontsize=12,
-                      verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-    
+            axs[i].text(0.02, 0.95, f'Mean: {mean_val:.3f}',
+                        transform=axs[i].transAxes, fontsize=12,
+                        verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
     plt.tight_layout()
     plt.show()
