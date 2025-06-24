@@ -21,7 +21,7 @@ def tokenizer_spacy(text):
     return [token.text for token in nlp(text)]
 
 
-class LIMETextExplanationWrapper:
+class CnnLimeExplainer:
     """
     A wrapper class to make the SpamCNN model compatible with LIME's TextExplainer.
     LIME expects a predict_proba function that takes a list of raw strings
@@ -92,7 +92,7 @@ def get_lime_explanation(model, original_text, word_to_idx, idx_to_word, num_fea
     model.to(device)
 
     # Create the wrapper for LIME
-    explainer_wrapper = LIMETextExplanationWrapper(model, word_to_idx, idx_to_word, str(device))
+    explainer_wrapper = CnnLimeExplainer(model, word_to_idx, idx_to_word, str(device))
 
     # Initialize LimeTextExplainer with the custom tokenizer
     explainer = LimeTextExplainer(
