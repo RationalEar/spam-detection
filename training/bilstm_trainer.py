@@ -88,9 +88,8 @@ def train_bilstm(train_df, val_df, test_df, embedding_dim=300, pretrained_embedd
             # Adversarial training
             if adversarial_training:
                 # Generate adversarial examples
-                # Ensure inputs are in a format generate_adversarial_example expects (token IDs)
-                # If generate_adversarial_example returns continuous embeddings, the subsequent model(adv_embeddings) call should expect that.
-                # Your BiLSTMSpam model handles both (token IDs or embeddings) which is great.
+                # Make sure model is in training mode for gradient computation
+                model.train()  # Explicitly set training mode before generating adversarial examples
                 with torch.set_grad_enabled(True):  # PGD requires gradients here
                     adv_inputs = model.generate_adversarial_example(inputs, labels, epsilon=epsilon)
                     # Forward pass with adversarial examples
