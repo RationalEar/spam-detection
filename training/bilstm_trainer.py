@@ -8,23 +8,21 @@ from utils.functions import build_vocab, encode
 
 
 def train_bilstm(train_df, val_df, test_df, embedding_dim=300, pretrained_embeddings=None,
-                 model_save_path='', max_len=200, max_norm=1.0, adversarial_training=True, epsilon=0.1,
-                 patience=5):
+                 model_save_path='', max_len=200, max_norm=1.0, adversarial_training=True, epsilon=0.1):
     """
-    Train BiLSTM model with gradient clipping and adversarial training and early stopping.
+    Train BiLSTM model with gradient clipping and adversarial training
 
     Args:
         train_df: DataFrame containing training data
         val_df: DataFrame containing validation data
         test_df: DataFrame containing test data
         embedding_dim: Dimension of word embeddings
-        pretrained_embeddings: Pretrained embeddings tensor
+        pretrained_embeddings: Pre-trained embeddings tensor
         model_save_path: Directory to save model checkpoints
         max_len: Maximum sequence length
         max_norm: Maximum gradient norm for clipping
         adversarial_training: Whether to use adversarial training
         epsilon: Epsilon for adversarial example generation
-        patience: Number of epochs to wait for validation loss improvement before early stopping.
     """
     # Build vocabulary from training data only
     word2idx, idx2word = build_vocab(train_df['text'])
@@ -41,7 +39,7 @@ def train_bilstm(train_df, val_df, test_df, embedding_dim=300, pretrained_embedd
                        pretrained_embeddings=pretrained_embeddings)
 
     # Training parameters
-    num_epochs = 40  # Max epochs, early stopping might stop sooner
+    num_epochs = 40
     learning_rate = 8e-4
     batch_size = 32
 
@@ -60,11 +58,9 @@ def train_bilstm(train_df, val_df, test_df, embedding_dim=300, pretrained_embedd
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size)
 
-    # --- Early Stopping Variables ---
-    best_val_loss = float('inf')
-    epochs_no_improve = 0
-
     # Train BiLSTM with specialized training loop
+    best_val_loss = float('inf')
+
     for epoch in range(num_epochs):
         # Training phase
         model.train()
@@ -74,42 +70,21 @@ def train_bilstm(train_df, val_df, test_df, embedding_dim=300, pretrained_embedd
 
         for batch in train_loader:
             inputs, labels = [b.to(device) for b in batch]
-            # Ensure labels are 1D (batch_size) for BCELoss with outputs.squeeze(-1)
-            labels = labels.squeeze(-1) if labels.ndim > 1 else labels
+            batch_size = inputs.size(0)
 
             # Regular forward pass
             optimizer.zero_grad()
-            outputs, _ = model(inputs)  # outputs will be (batch_size,) due to squeeze(-1) in model
-
-            # Check if outputs or labels have an extra dimension and squeeze if needed
-            # This is important as BCELoss expects (N,) and (N,) or (N,1) and (N,1)
+            outputs, _ = model(inputs)
             loss = criterion(outputs, labels)
 
             # Adversarial training
             if adversarial_training:
-                # Force training mode before and during adversarial example generation
-                model.train()
-
-                # Create a separate computation graph for adversarial examples
-                adv_inputs = inputs.clone().detach().requires_grad_(True)
-                adv_outputs, _ = model(adv_inputs)
+                # Generate adversarial examples
+                with torch.set_grad_enabled(True):
+                    adv_embeddings = model.generate_adversarial_example(inputs, labels, epsilon=epsilon)
+                    # Forward pass with adversarial examples
+                    adv_outputs, _ = model(adv_embeddings)
                 adv_loss = criterion(adv_outputs, labels)
-
-                # Compute gradients w.r.t input
-                grad_wrt_input = torch.autograd.grad(
-                    adv_loss, adv_inputs, retain_graph=True, create_graph=False
-                )[0]
-
-                # Create adversarial examples using the sign of the gradient
-                with torch.no_grad():
-                    adv_inputs = adv_inputs + epsilon * grad_wrt_input.sign()
-                    adv_inputs = torch.clamp(adv_inputs, 0, len(word2idx)-1)  # Ensure valid indices
-
-                # Forward pass with adversarial examples
-                model.train()  # Make absolutely sure we're in train mode
-                adv_outputs, _ = model(adv_inputs)
-                adv_loss = criterion(adv_outputs, labels)
-
                 # Combine losses
                 loss = 0.5 * (loss + adv_loss)
 
@@ -118,10 +93,10 @@ def train_bilstm(train_df, val_df, test_df, embedding_dim=300, pretrained_embedd
             model.clip_gradients(max_norm)
             optimizer.step()
 
-            total_train_loss += loss.item() * inputs.size(0)  # Use inputs.size(0) for actual batch size
+            total_train_loss += loss.item() * batch_size
             predicted = (outputs > 0.5).float()
             correct_train += (predicted == labels).sum().item()
-            total_train += inputs.size(0)
+            total_train += batch_size
 
         avg_train_loss = total_train_loss / total_train
         train_acc = correct_train / total_train
@@ -135,15 +110,15 @@ def train_bilstm(train_df, val_df, test_df, embedding_dim=300, pretrained_embedd
         with torch.no_grad():
             for batch in val_loader:
                 inputs, labels = [b.to(device) for b in batch]
-                labels = labels.squeeze(-1) if labels.ndim > 1 else labels  # Ensure labels are 1D
+                batch_size = inputs.size(0)
 
                 outputs, _ = model(inputs)
                 loss = criterion(outputs, labels)
 
-                total_val_loss += loss.item() * inputs.size(0)
+                total_val_loss += loss.item() * batch_size
                 predicted = (outputs > 0.5).float()
                 correct_val += (predicted == labels).sum().item()
-                total_val += inputs.size(0)
+                total_val += batch_size
 
         avg_val_loss = total_val_loss / total_val
         val_acc = correct_val / total_val
@@ -160,25 +135,12 @@ def train_bilstm(train_df, val_df, test_df, embedding_dim=300, pretrained_embedd
         print(f'Train Loss: {avg_train_loss:.4f}, Train Acc: {train_acc:.4f}')
         print(f'Val Loss: {avg_val_loss:.4f}, Val Acc: {val_acc:.4f}')
 
-        # --- Early Stopping Logic ---
+        # Save best model
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            epochs_no_improve = 0  # Reset counter
             if model_save_path:
                 best_model_path = os.path.join(model_save_path, 'best_bilstm_model.pt')
-                model.save(best_model_path)  # Save the best model
+                model.save(best_model_path)
                 print(f"Saved best model to {best_model_path}")
-        else:
-            epochs_no_improve += 1  # Increment counter
-            print(f"Validation loss did not improve for {epochs_no_improve} epoch(s).")
-            if epochs_no_improve >= patience:
-                print(f"Early stopping triggered! No improvement for {patience} consecutive epochs.")
-                break  # Exit the training loop
-
-    # After loop, load the best model for final evaluation (optional, but good practice)
-    if model_save_path and os.path.exists(os.path.join(model_save_path, 'best_bilstm_model.pt')):
-        final_model_path = os.path.join(model_save_path, 'best_bilstm_model.pt')
-        print(f"Loading best model from {final_model_path} for final return.")
-        model.load(final_model_path)
 
     return model
