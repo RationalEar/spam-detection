@@ -87,16 +87,31 @@ def train_bilstm(train_df, val_df, test_df, embedding_dim=300, pretrained_embedd
 
             # Adversarial training
             if adversarial_training:
-                # Generate adversarial examples
-                # Make sure model is in training mode for gradient computation
-                model.train()  # Explicitly set training mode before generating adversarial examples
-                with torch.set_grad_enabled(True):  # PGD requires gradients here
-                    adv_inputs = model.generate_adversarial_example(inputs, labels, epsilon=epsilon)
-                    # Forward pass with adversarial examples
-                    adv_outputs, _ = model(adv_inputs)
-                    adv_loss = criterion(adv_outputs, labels)
-                    # Combine losses
-                    loss = 0.5 * (loss + adv_loss)
+                # Force training mode before and during adversarial example generation
+                model.train()
+
+                # Create a separate computation graph for adversarial examples
+                adv_inputs = inputs.clone().detach().requires_grad_(True)
+                adv_outputs, _ = model(adv_inputs)
+                adv_loss = criterion(adv_outputs, labels)
+
+                # Compute gradients w.r.t input
+                grad_wrt_input = torch.autograd.grad(
+                    adv_loss, adv_inputs, retain_graph=True, create_graph=False
+                )[0]
+
+                # Create adversarial examples using the sign of the gradient
+                with torch.no_grad():
+                    adv_inputs = adv_inputs + epsilon * grad_wrt_input.sign()
+                    adv_inputs = torch.clamp(adv_inputs, 0, len(word2idx)-1)  # Ensure valid indices
+
+                # Forward pass with adversarial examples
+                model.train()  # Make absolutely sure we're in train mode
+                adv_outputs, _ = model(adv_inputs)
+                adv_loss = criterion(adv_outputs, labels)
+
+                # Combine losses
+                loss = 0.5 * (loss + adv_loss)
 
             loss.backward()
             # Clip gradients
