@@ -8,7 +8,7 @@ from utils.functions import build_vocab, encode
 
 
 def train_bilstm(train_df, val_df, test_df, embedding_dim=300, pretrained_embeddings=None,
-                 model_save_path='', max_len=200, max_norm=1.0, adversarial_training=True, epsilon=0.1):
+                 model_save_path='', max_len=200, max_norm=1.0, adversarial_training=False, epsilon=0.1):
     """
     Train BiLSTM model with gradient clipping and adversarial training
 
