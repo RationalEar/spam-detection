@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import json
 import os
+
+from anyio.lowlevel import checkpoint
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 
@@ -354,16 +356,21 @@ class BiLSTMSpam(nn.Module):
                 'training_history': self.training_history
             }, f, indent=4)
 
-    def load(self, path):
+    def load(self, path, map_location=None):
         """
         Load model state, configuration, and training history
         """
-        checkpoint = torch.load(path)
+
+        if map_location is None:
+            map_location = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        checkpoint = torch.load(path, map_location=map_location)
+        # self.load_state_dict(checkpoint)
         
         # Load configuration if available
         if 'config' in checkpoint:
             self.config = checkpoint['config']
-        
+
         # Load training history if available
         if 'training_history' in checkpoint:
             self.training_history = checkpoint['training_history']
@@ -373,5 +380,5 @@ class BiLSTMSpam(nn.Module):
             self.load_state_dict(checkpoint['model_state_dict'])
         else:
             self.load_state_dict(checkpoint)
-        
+
         self.eval()
