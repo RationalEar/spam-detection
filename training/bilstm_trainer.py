@@ -8,10 +8,10 @@ from utils.functions import build_vocab, encode
 
 
 def train_bilstm(train_df, val_df, test_df, embedding_dim=300, pretrained_embeddings=None,
-                model_save_path='', max_len=200, max_norm=1.0, adversarial_training=True, epsilon=0.1):
+                 model_save_path='', max_len=200, max_norm=1.0, adversarial_training=False, epsilon=0.1):
     """
     Train BiLSTM model with gradient clipping and adversarial training
-    
+
     Args:
         train_df: DataFrame containing training data
         val_df: DataFrame containing validation data
@@ -30,34 +30,34 @@ def train_bilstm(train_df, val_df, test_df, embedding_dim=300, pretrained_embedd
     # Encode all datasets
     X_train = torch.tensor([encode(t, word2idx, max_len) for t in train_df['text']])
     y_train = torch.tensor(train_df['label'].values, dtype=torch.float32)
-    
+
     X_val = torch.tensor([encode(t, word2idx, max_len) for t in val_df['text']])
     y_val = torch.tensor(val_df['label'].values, dtype=torch.float32)
-    
+
     # Initialize BiLSTM model
     model = BiLSTMSpam(vocab_size=len(word2idx), embedding_dim=embedding_dim,
                        pretrained_embeddings=pretrained_embeddings)
-    
+
     # Training parameters
     num_epochs = 40
     learning_rate = 8e-4
     batch_size = 32
-    
+
     # Move model to GPU if available
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
-    
+
     # Loss function and optimizer
     criterion = nn.BCELoss()
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
-    
+
     # Create datasets and dataloaders
     train_dataset = TensorDataset(X_train, y_train)
     val_dataset = TensorDataset(X_val, y_val)
-    
+
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size)
-    
+
     # Train BiLSTM with specialized training loop
     best_val_loss = float('inf')
 
@@ -84,9 +84,9 @@ def train_bilstm(train_df, val_df, test_df, embedding_dim=300, pretrained_embedd
                     adv_embeddings = model.generate_adversarial_example(inputs, labels, epsilon=epsilon)
                     # Forward pass with adversarial examples
                     adv_outputs, _ = model(adv_embeddings)
-                    adv_loss = criterion(adv_outputs, labels)
-                    # Combine losses
-                    loss = 0.5 * (loss + adv_loss)
+                adv_loss = criterion(adv_outputs, labels)
+                # Combine losses
+                loss = 0.5 * (loss + adv_loss)
 
             loss.backward()
             # Clip gradients
