@@ -4,7 +4,7 @@ import torch
 from sklearn.metrics import classification_report, confusion_matrix
 from torch.utils.data import TensorDataset, DataLoader
 
-from training.bert_trainer import train_bert
+from training.bert_trainer_enhanced import train_bert
 from training.bilstm_trainer import train_bilstm
 from training.cnn_trainer import train_cnn
 from utils.functions import build_vocab, encode
