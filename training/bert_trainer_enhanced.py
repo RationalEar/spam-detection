@@ -138,6 +138,10 @@ def train_bert(train_df, val_df, test_df, model_save_path='', max_len=200, early
             # Check tensor dimensions before squeezing
             if outputs.dim() > 1 and outputs.shape[1] == 1:
                 outputs = outputs.squeeze(1)
+            
+            # Ensure consistent dtypes for loss calculation
+            outputs = outputs.float()
+            labels = labels.float()
                 
             loss = criterion(outputs, labels)
             loss.backward()
@@ -165,6 +169,10 @@ def train_bert(train_df, val_df, test_df, model_save_path='', max_len=200, early
                 # Check tensor dimensions before squeezing
                 if outputs.dim() > 1 and outputs.shape[1] == 1:
                     outputs = outputs.squeeze(1)
+                
+                # Ensure consistent dtypes for validation loss
+                outputs = outputs.float()
+                labels = labels.float()
                 
                 # Use standard BCE for validation (no label smoothing)
                 val_loss = nn.BCELoss()(outputs, labels)

@@ -53,7 +53,6 @@ class SpamBERT(nn.Module):
             token_type_ids=token_type_ids
         )[0]
 
-    @autocast('cuda')  # Enable automatic mixed precision
     def forward(self, input_ids, attention_mask=None, token_type_ids=None, 
                 return_attentions=False) -> Tuple[torch.Tensor, Optional[Dict[str, torch.Tensor]]]:
         """
@@ -145,14 +144,13 @@ class SpamBERT(nn.Module):
             # Clear CUDA cache
             torch.cuda.empty_cache()
             
-            # Compute attributions for chunk using FP16
-            with autocast(device_type='cuda', dtype=torch.float16):
-                chunk_attributions, chunk_delta = lig.attribute(
-                    inputs=chunk_input_ids,
-                    additional_forward_args=(chunk_attention, chunk_token_types),
-                    n_steps=n_steps,
-                    return_convergence_delta=True
-                )
+            # Compute attributions for chunk
+            chunk_attributions, chunk_delta = lig.attribute(
+                inputs=chunk_input_ids,
+                additional_forward_args=(chunk_attention, chunk_token_types),
+                n_steps=n_steps,
+                return_convergence_delta=True
+            )
             
             # Move results back to CPU
             all_attributions.append(chunk_attributions.cpu())
