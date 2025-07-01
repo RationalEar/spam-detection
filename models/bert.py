@@ -189,3 +189,22 @@ class SpamBERT(nn.Module):
         """Load model state and set to eval mode"""
         self.load_state_dict(torch.load(path))
         self.eval()
+
+
+def tokenize_texts(texts, tokenizer, max_length=512):
+    """Tokenize texts for BERT input"""
+    input_ids = []
+    attention_masks = []
+
+    for text in texts:
+        encoded = tokenizer(
+            text,
+            padding='max_length',
+            truncation=True,
+            max_length=max_length,
+            return_tensors='pt'
+        )
+        input_ids.append(encoded['input_ids'].squeeze(0))
+        attention_masks.append(encoded['attention_mask'].squeeze(0))
+
+    return torch.stack(input_ids), torch.stack(attention_masks)

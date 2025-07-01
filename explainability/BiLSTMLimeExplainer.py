@@ -89,7 +89,7 @@ class BiLSTMLimeExplainer:
             return np.column_stack((not_spam_probs, spam_probs))
 
 
-def get_lime_explanation(model, original_text, word_to_idx, idx_to_word, num_features=10, num_samples=500, alpha=0.01):
+def get_lime_explanation(model, original_text, word_to_idx, idx_to_word, num_features=10, num_samples=100, alpha=0.01):
     """
     Generates a LIME explanation for a given text.
 
