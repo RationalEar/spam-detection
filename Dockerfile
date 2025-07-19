@@ -1,34 +1,40 @@
-# Stage 1: Builder - Install dependencies
-FROM python:3.10-slim-buster AS builder
+# Use Python 3.10 slim image
+FROM python:3.10-slim
 
+# Set working directory
 WORKDIR /app
 
-# Copy only requirements.txt first to leverage Docker cache
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install dependencies using pip wheel for caching
-RUN pip wheel --no-cache-dir --wheel-dir=/usr/src/app/wheels -r requirements.txt
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Stage 2: Runner - Create the final image
-FROM python:3.10-slim-buster
-
-WORKDIR /app
-
-# Copy pre-built wheels from the builder stage
-COPY --from=builder /usr/src/app/wheels /wheels
-
-# Install packages from wheels
-RUN pip install --no-cache-dir /wheels/* \
-    && rm -rf /wheels # Clean up wheels after installation to reduce image size
-
-# Copy the entire project
+# Copy the application code
 COPY . .
 
-# Expose the Jupyter port (default 8888)
-EXPOSE 8888
+# Create models directory
+RUN mkdir -p models
 
-# Define an entrypoint script
-ENTRYPOINT ["./start.sh"]
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV API_HOST=0.0.0.0
+ENV API_PORT=8000
+ENV DEBUG=false
+ENV LOG_LEVEL=INFO
 
-# Default command if no arguments are provided to the container
-CMD ["jupyter"]
+# Expose the API port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Run the API
+CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
