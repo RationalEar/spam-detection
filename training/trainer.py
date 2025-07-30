@@ -11,6 +11,7 @@ from training.bilstm_trainer import train_bilstm
 from training.cnn_trainer import train_cnn
 from utils.functions import build_vocab, encode
 
+mlflow.set_experiment("Model-Training-Tracing")
 
 @mlflow.trace(name = "Model Training", span_type=SpanType.CHAIN)
 def train_model(model_type, train_df, val_df=None, test_df=None, embedding_dim=300, pretrained_embeddings=None,
