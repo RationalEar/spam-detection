@@ -15,6 +15,15 @@ if "google.colab" in sys.modules:
     IS_COLAB = True
     DATA_PATH = "/content/drive/MyDrive/Projects/spam-detection-data"
     WORKSPACE_DIR = "/content/spam-detection"
+    
+    from google.colab import userdata
+    
+    os.environ["DATABRICKS_HOST"] = userdata.get('DATABRICKS_HOST')
+    os.environ["DATABRICKS_TOKEN"] = userdata.get('DATABRICKS_TOKEN')
+    os.environ["MLFLOW_REGISTRY_URI"] = userdata.get('MLFLOW_REGISTRY_URI')
+    os.environ["MLFLOW_EXPERIMENT_ID"] = userdata.get('MLFLOW_EXPERIMENT_ID')
+    os.environ["MLFLOW_TRACKING_URI"] = userdata.get('MLFLOW_TRACKING_URI')
+    
 elif platform.system() == "Windows" and os.path.exists(windows_path):
     DATA_PATH = windows_path
 elif platform.system() == "Linux" and os.path.exists(linux_path):
