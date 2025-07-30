@@ -18,6 +18,7 @@ if "google.colab" in sys.modules:
     
     from google.colab import userdata
     
+    host = userdata.get('DATABRICKS_HOST')
     os.environ["DATABRICKS_HOST"] = userdata.get('DATABRICKS_HOST')
     os.environ["DATABRICKS_TOKEN"] = userdata.get('DATABRICKS_TOKEN')
     os.environ["MLFLOW_REGISTRY_URI"] = userdata.get('MLFLOW_REGISTRY_URI')
