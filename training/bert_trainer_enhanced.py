@@ -1,5 +1,8 @@
 import os
+
+import mlflow
 import torch
+from mlflow.entities import SpanType
 from torch import nn, optim
 from torch.utils.data import TensorDataset, DataLoader
 from transformers import BertTokenizer
@@ -20,6 +23,7 @@ class LabelSmoothingBCELoss(nn.Module):
         return self.bce(pred, smoothed_target)
 
 
+@mlflow.trace(name = "Model Training", span_type=SpanType.CHAIN)
 def get_layerwise_optimizer(model, base_lr=2e-5, decay_factor=0.9):
     """
     Create optimizer with layer-wise learning rate decay
@@ -59,6 +63,7 @@ def get_layerwise_optimizer(model, base_lr=2e-5, decay_factor=0.9):
     return optim.AdamW(parameters, weight_decay=0.01)
 
 
+@mlflow.trace(name = "Model Training", span_type=SpanType.CHAIN)
 def train_bert(train_df, val_df, test_df, model_save_path='', max_len=200, early_stopping_patience=5):
     """
     Train BERT model with enhanced regularization and optimization
