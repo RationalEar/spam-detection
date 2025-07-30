@@ -1,5 +1,8 @@
 import os
+
+import mlflow
 import torch
+from mlflow.entities import SpanType
 from torch import nn, optim
 from torch.utils.data import TensorDataset, DataLoader
 
@@ -7,6 +10,7 @@ from models.bilstm import BiLSTMSpam
 from utils.functions import build_vocab, encode
 
 
+@mlflow.trace(name = "Model Training", span_type=SpanType.CHAIN)
 def train_bilstm(train_df, val_df, test_df, embedding_dim=300, pretrained_embeddings=None,
                  model_save_path='', max_len=200, max_norm=1.0, adversarial_training=False, epsilon=0.1):
     """

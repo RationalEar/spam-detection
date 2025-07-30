@@ -1,6 +1,8 @@
 import os
 
+import mlflow
 import torch
+from mlflow.entities import SpanType
 from sklearn.metrics import classification_report, confusion_matrix
 from torch.utils.data import TensorDataset, DataLoader
 
@@ -10,6 +12,7 @@ from training.cnn_trainer import train_cnn
 from utils.functions import build_vocab, encode
 
 
+@mlflow.trace(name = "Model Training", span_type=SpanType.CHAIN)
 def train_model(model_type, train_df, val_df=None, test_df=None, embedding_dim=300, pretrained_embeddings=None,
                 model_save_path='', max_len=200, evaluate=False, early_stopping_patience=5):
     """
@@ -79,6 +82,7 @@ def train_model(model_type, train_df, val_df=None, test_df=None, embedding_dim=3
     return model
 
 
+@mlflow.trace(name = "Model Evaluation", span_type=SpanType.CHAIN)
 def evaluate_model(model, model_type, X_test=None, y_test=None, test_loader=None):
     """
     Evaluate model performance on test data

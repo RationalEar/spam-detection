@@ -15,6 +15,7 @@ if "google.colab" in sys.modules:
     IS_COLAB = True
     DATA_PATH = "/content/drive/MyDrive/Projects/spam-detection-data"
     WORKSPACE_DIR = "/content/spam-detection"
+    
 elif platform.system() == "Windows" and os.path.exists(windows_path):
     DATA_PATH = windows_path
 elif platform.system() == "Linux" and os.path.exists(linux_path):
