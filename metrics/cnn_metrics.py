@@ -206,8 +206,8 @@ def compute_explanation_metrics(model, x, cam_maps, num_perturbations=10):
             k_orig = min(k_top_features, current_cam_original.numel())
             k_pert = min(k_top_features, cam_perturbed_single.numel())
             if k_orig > 0 and k_pert > 0:
-                _, top_k_orig_indices = torch.topk(current_cam_original, k_orig)
-                _, top_k_pert_indices = torch.topk(cam_perturbed_single, k_pert)
+                _, top_k_orig_indices = torch.topk(current_cam_original.flatten(), k_orig)
+                _, top_k_pert_indices = torch.topk(cam_perturbed_single.flatten(), k_pert)
                 set_orig = set(top_k_orig_indices.cpu().tolist())
                 set_pert = set(top_k_pert_indices.cpu().tolist())
                 intersection = len(set_orig & set_pert)
