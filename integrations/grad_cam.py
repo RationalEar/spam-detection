@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
+import time
+from typing import Dict, List, Tuple
 
 
 def grad_cam(model, x, target_class=None):
@@ -205,6 +207,148 @@ def grad_cam_auto(model, x, target_class=None):
         handle_bwd.remove()
         # Clear any remaining gradients
         model.zero_grad(set_to_none=True)
+
+
+def grad_cam_with_timing(model, x, target_class=None, return_timing=True):
+    """
+    Compute Grad-CAM for the input batch x with timing measurements.
+    Args:
+        model: CNN model
+        x: input tensor (batch_size, seq_len)
+        target_class: index of the class to compute Grad-CAM for (default: predicted class)
+        return_timing: whether to return timing information
+    Returns:
+        If return_timing=True:
+            tuple: (cam, timing_info) where timing_info is a dict with timing details
+        If return_timing=False:
+            cam: class activation map (batch_size, seq_len)
+    """
+    timing_info = {}
+    total_start = time.time()
+    
+    # Time the actual grad_cam computation
+    grad_cam_start = time.time()
+    cam = grad_cam(model, x, target_class)
+    grad_cam_end = time.time()
+    
+    total_end = time.time()
+    
+    # Record timing information
+    timing_info = {
+        'grad_cam_time': grad_cam_end - grad_cam_start,
+        'total_time': total_end - total_start,
+        'batch_size': x.size(0),
+        'seq_length': x.size(1),
+        'time_per_message': (grad_cam_end - grad_cam_start) / x.size(0)
+    }
+    
+    if return_timing:
+        return cam, timing_info
+    else:
+        return cam
+
+
+def measure_grad_cam_timing(model, messages: List[torch.Tensor], target_classes=None,
+                           batch_size=1) -> Dict[str, List[float]]:
+    """
+    Measure timing for Grad-CAM explanation generation across multiple messages.
+    Args:
+        model: CNN model
+        messages: List of input tensors, each representing a message
+        target_classes: List of target classes (optional)
+        batch_size: Size of batches to process (default: 1 for per-message timing)
+    Returns:
+        Dict with timing statistics per message and overall statistics
+    """
+    timing_results = {
+        'per_message_times': [],
+        'batch_times': [],
+        'message_lengths': [],
+        'batch_sizes': []
+    }
+    
+    # Process messages in batches
+    for i in range(0, len(messages), batch_size):
+        batch_end = min(i + batch_size, len(messages))
+        batch_messages = messages[i:batch_end]
+        
+        # Stack messages into a batch tensor
+        # Pad to same length if necessary
+        max_len = max(msg.size(-1) for msg in batch_messages)
+        padded_messages = []
+        for msg in batch_messages:
+            if msg.dim() == 1:
+                msg = msg.unsqueeze(0)  # Add batch dimension if missing
+            if msg.size(-1) < max_len:
+                # Pad with zeros
+                pad_size = max_len - msg.size(-1)
+                msg = torch.cat([msg, torch.zeros(msg.size(0), pad_size, dtype=msg.dtype)], dim=-1)
+            padded_messages.append(msg)
+        
+        batch_tensor = torch.cat(padded_messages, dim=0)
+        
+        # Get target classes for this batch if provided
+        batch_target = None
+        if target_classes is not None:
+            batch_target = target_classes[i:batch_end]
+            if isinstance(batch_target, list):
+                batch_target = torch.tensor(batch_target)
+        
+        # Measure timing for this batch
+        batch_start = time.time()
+        cam, timing_info = grad_cam_with_timing(model, batch_tensor, batch_target, return_timing=True)
+        batch_end_time = time.time()
+        
+        # Record timing information
+        timing_results['batch_times'].append(timing_info['total_time'])
+        timing_results['batch_sizes'].append(batch_tensor.size(0))
+        
+        # Record per-message timing (approximate for batches > 1)
+        for j in range(len(batch_messages)):
+            timing_results['per_message_times'].append(timing_info['time_per_message'])
+            timing_results['message_lengths'].append(batch_messages[j].size(-1))
+    
+    # Calculate summary statistics
+    timing_results['stats'] = {
+        'mean_time_per_message': sum(timing_results['per_message_times']) / len(timing_results['per_message_times']),
+        'min_time_per_message': min(timing_results['per_message_times']),
+        'max_time_per_message': max(timing_results['per_message_times']),
+        'total_messages': len(timing_results['per_message_times']),
+        'total_time': sum(timing_results['batch_times'])
+    }
+    
+    return timing_results
+
+
+def print_timing_summary(timing_results: Dict[str, List[float]]):
+    """
+    Print a summary of timing results in a readable format.
+    """
+    stats = timing_results['stats']
+    
+    print("=== Grad-CAM Timing Summary ===")
+    print(f"Total messages processed: {stats['total_messages']}")
+    print(f"Total time: {stats['total_time']:.4f} seconds")
+    print(f"Mean time per message: {stats['mean_time_per_message']:.4f} seconds")
+    print(f"Min time per message: {stats['min_time_per_message']:.4f} seconds")
+    print(f"Max time per message: {stats['max_time_per_message']:.4f} seconds")
+    print(f"Messages per second: {stats['total_messages'] / stats['total_time']:.2f}")
+    
+    # Message length analysis
+    if timing_results['message_lengths']:
+        import statistics
+        lengths = timing_results['message_lengths']
+        times = timing_results['per_message_times']
+        
+        print(f"\n=== Message Length Analysis ===")
+        print(f"Mean message length: {statistics.mean(lengths):.1f} tokens")
+        print(f"Min message length: {min(lengths)} tokens")
+        print(f"Max message length: {max(lengths)} tokens")
+        
+        # Correlation between length and time (simple)
+        if len(lengths) > 1:
+            correlation = statistics.correlation(lengths, times) if hasattr(statistics, 'correlation') else 0
+            print(f"Length-Time correlation: {correlation:.3f}")
 
 
 def visualize_explanation(text, cam_map, pred_prob, idx, max_len):

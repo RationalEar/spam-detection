@@ -9,7 +9,7 @@ from metrics.cnn_metrics import (
     measure_adversarial_robustness,
     evaluate_adversarial_examples
 )
-from integrations.grad_cam import grad_cam, grad_cam_auto
+from integrations.grad_cam import grad_cam, grad_cam_auto, grad_cam_with_timing
 
 
 class SpamCNN(nn.Module):
@@ -43,7 +43,7 @@ class SpamCNN(nn.Module):
         """
         Wrapper for grad_cam function from integrations.grad_cam
         """
-        return grad_cam(self, x, target_class)
+        return grad_cam_with_timing(self, x, target_class)
     
     def grad_cam_auto(self, x, target_class=None):
         """
