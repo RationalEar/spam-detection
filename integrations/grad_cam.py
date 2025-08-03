@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 import time
 from typing import Dict, List, Tuple
+from utils.device_utils import ensure_device_consistency
 
 
 def grad_cam(model, x, target_class=None):
@@ -16,14 +17,22 @@ def grad_cam(model, x, target_class=None):
         cam: class activation map (batch_size, seq_len)
     """
     model.eval()
-    # Force CPU computation to avoid CUDA errors
-    model.to('cpu')
-    
-    # Ensure x is on CPU and remains a LongTensor for embedding
-    x_cpu = x.detach().cpu()
+
+    # Store original device and ensure consistency
+    original_device = next(model.parameters()).device
+
+    # Ensure model is on the same device as input
+    input_device = x.device
+    working_device = input_device if input_device.type in ['cuda', 'cpu'] else original_device
+
+    # Move model to working device and ensure consistency
+    ensure_device_consistency(model, working_device)
+
+    # Ensure input is on the working device
+    x_device = x.detach().to(working_device).long()
     if target_class is not None:
-        target_class = target_class.detach().cpu()
-    
+        target_class = target_class.detach().to(working_device)
+
     # Set up for gradient capture
     activations = []
     gradients = []
@@ -41,8 +50,8 @@ def grad_cam(model, x, target_class=None):
     try:
         # Forward pass
         with torch.set_grad_enabled(True):
-            # Pass through model
-            x_emb = model.embedding(x_cpu)  # x must remain a LongTensor
+            # Pass through model - ensure x is LongTensor for embedding
+            x_emb = model.embedding(x_device)
             x_perm = x_emb.permute(0, 2, 1)
             x1 = F.relu(model.conv1(x_perm))
             x2 = F.relu(model.conv2(x1))
@@ -86,17 +95,23 @@ def grad_cam(model, x, target_class=None):
             if cam_max > cam_min:  # Avoid division by zero
                 cam[i] = (cam[i] - cam_min) / (cam_max - cam_min)
         
-        return cam
-    
+        # Move result to the same device as original input
+        result_cam = cam.to(input_device)
+
+        return result_cam
+
     except Exception as e:
         print(f"Error in grad_cam: {str(e)}")
-        # Return uniform importance as fallback
-        return torch.ones(x_cpu.size(0), x_cpu.size(1), dtype=torch.float)
-    
+        # Return uniform importance as fallback on the same device as input
+        fallback = torch.ones(x.size(0), x.size(1), dtype=torch.float, device=input_device)
+        return fallback
+
     finally:
         # Always remove hooks
         handle_fwd.remove()
         handle_bwd.remove()
+        # Restore model to its original device and ensure consistency
+        ensure_device_consistency(model, original_device)
 
 
 def grad_cam_auto(model, x, target_class=None):
