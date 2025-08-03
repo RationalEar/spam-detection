@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from scipy.stats import spearmanr  # For Rank Correlation
+from utils.device_utils import ensure_device_consistency
 
 import metrics.metrics
 
@@ -34,27 +35,21 @@ def compute_explanation_metrics(model, x, cam_maps, num_perturbations=10):
     Returns:
         dict: Dictionary containing explainability metrics
     """
+    # Put model in eval mode
     model.eval()
 
-    # Ensure model is on CUDA if available
-    if torch.cuda.is_available():
-        model.cuda()
-        device = 'cuda'
-    else:
-        model.cpu()
-        device = 'cpu'
+    # Ensure device consistency and get the device
+    device = ensure_device_consistency(model)
 
-    # Move input tensors to the same device as model
+    # Ensure input tensors are on the same device
     x = x.to(device)
     cam_maps = cam_maps.to(device)
-
-    # Ensure embedding layer is on the correct device
-    model.embedding = model.embedding.to(device)
 
     batch_size = x.size(0)
 
     def compute_auc_del(x_single, cam_single):
-        # Ensure input tensors are on correct device
+        """Compute AUC Deletion curve for a single sample."""
+        # Ensure inputs are on correct device
         x_single = x_single.to(device)
         cam_single = cam_single.to(device)
 
@@ -64,24 +59,24 @@ def compute_explanation_metrics(model, x, cam_maps, num_perturbations=10):
 
         # Base prediction with all tokens
         with torch.no_grad():
-            # Ensure input is LongTensor
-            x_input = x_single.unsqueeze(0).long()
+            # Create proper input tensor
+            x_input = x_single.unsqueeze(0).long().to(device)
             base_pred = model(x_input).item()
         deletions.append(base_pred)
 
         # Create mask tensor for token deletion (using PAD token)
         pad_token = 0  # Assuming 0 is the PAD token
-        x_perturbed = x_single.clone()
 
         # Progressively delete most important tokens
         for i in range(1, len(indices)):
             # Create a copy with top-i tokens masked as PAD
-            x_perturbed = x_single.clone()
-            x_perturbed[indices[:i]] = pad_token
+            x_perturbed = x_single.clone().to(device)
+            idx_to_mask = indices[:i]
+            for idx in idx_to_mask:
+                x_perturbed[idx.item()] = pad_token
 
             with torch.no_grad():
-                # Ensure input is LongTensor
-                x_input = x_perturbed.unsqueeze(0).long()
+                x_input = x_perturbed.unsqueeze(0).long().to(device)
                 pred = model(x_input)
             deletions.append(pred.item())
 
@@ -90,7 +85,8 @@ def compute_explanation_metrics(model, x, cam_maps, num_perturbations=10):
         return auc_del
 
     def compute_auc_ins(x_single, cam_single):
-        # Ensure input tensors are on correct device
+        """Compute AUC Insertion curve for a single sample."""
+        # Ensure inputs are on correct device
         x_single = x_single.to(device)
         cam_single = cam_single.to(device)
 
@@ -100,22 +96,24 @@ def compute_explanation_metrics(model, x, cam_maps, num_perturbations=10):
 
         # Start with all tokens masked (PAD)
         pad_token = 0  # Assuming 0 is the PAD token
-        x_perturbed = torch.ones_like(x_single).long() * pad_token
+        x_perturbed = torch.ones_like(x_single).long().to(device) * pad_token
 
         # Get baseline prediction with all tokens masked
         with torch.no_grad():
-            x_input = x_perturbed.unsqueeze(0)
+            x_input = x_perturbed.unsqueeze(0).to(device)
             base_pred = model(x_input).item()
         insertions.append(base_pred)
 
         # Progressively insert most important tokens
         for i in range(1, len(indices)):
             # Reveal the top-i tokens
-            x_perturbed = torch.ones_like(x_single).long() * pad_token
-            x_perturbed[indices[:i]] = x_single[indices[:i]]
+            x_perturbed = torch.ones_like(x_single).long().to(device) * pad_token
+            idx_to_reveal = indices[:i]
+            for idx in idx_to_reveal:
+                x_perturbed[idx.item()] = x_single[idx.item()]
 
             with torch.no_grad():
-                x_input = x_perturbed.unsqueeze(0)
+                x_input = x_perturbed.unsqueeze(0).to(device)
                 pred = model(x_input)
             insertions.append(pred.item())
 
@@ -125,6 +123,7 @@ def compute_explanation_metrics(model, x, cam_maps, num_perturbations=10):
 
     def compute_comprehensiveness_single(x_single, cam_single, k=5):
         """Computes comprehensiveness for a single sample."""
+        # Ensure inputs are on correct device
         x_single = x_single.to(device)
         cam_single = cam_single.to(device)
 
@@ -133,22 +132,38 @@ def compute_explanation_metrics(model, x, cam_maps, num_perturbations=10):
         actual_k = min(k, num_features)
         if actual_k == 0: return 0.0
 
+        # Make a forward pass with the original input
         with torch.no_grad():
-            original_pred = model(x_single.unsqueeze(0).long()).item()
+            x_input = x_single.unsqueeze(0).long().to(device)
+            original_pred = model(x_input).item()
 
-        _, top_k_indices = torch.topk(cam_single, actual_k)
+        # Get the flattened indices of top-k features from cam
+        cam_flat = cam_single.flatten()
+        _, top_indices_flat = torch.topk(cam_flat, actual_k)
 
-        x_masked = x_single.clone()
-        x_masked[top_k_indices] = pad_token
+        # Create a masked version by cloning first
+        x_masked = x_single.clone().to(device)
 
+        # Handle each index individually to avoid device issues
+        for idx in top_indices_flat:
+            x_masked[idx.item()] = pad_token
+
+        # Make a forward pass with the masked input
         with torch.no_grad():
-            pred_after_removal = model(x_masked.unsqueeze(0).long()).item()
+            masked_input = x_masked.unsqueeze(0).long().to(device)
+            pred_after_removal = model(masked_input).item()
 
+        # Compute the comprehensiveness score
         comprehensiveness = original_pred - pred_after_removal
         return comprehensiveness
 
     def compute_rank_correlation_single(cam_original, cam_perturbed):
         """Computes Spearman's rank correlation for a single pair of CAMs."""
+        # Ensure inputs are on the same device before moving to CPU for numpy conversion
+        cam_original = cam_original.to(device)
+        cam_perturbed = cam_perturbed.to(device)
+
+        # Move to CPU for numpy operations
         cam_original_flat = cam_original.flatten().cpu().numpy()
         cam_perturbed_flat = cam_perturbed.flatten().cpu().numpy()
 
@@ -185,11 +200,12 @@ def compute_explanation_metrics(model, x, cam_maps, num_perturbations=10):
         num_valid_perturbations_for_stability = 0
 
         for _ in range(num_perturbations):
-            x_perturbed_single = x[i].clone()
+            x_perturbed_single = x[i].clone().to(device)
             non_pad_mask = (x_perturbed_single != 0)
             non_pad_indices = torch.nonzero(non_pad_mask, as_tuple=False).squeeze()
+            non_pad_indices = non_pad_indices.to(device)
 
-            current_cam_original = cam_maps[i]
+            current_cam_original = cam_maps[i].to(device)
 
             if non_pad_indices.numel() > 0:
                 non_pad_indices = non_pad_indices.view(-1)
@@ -200,14 +216,15 @@ def compute_explanation_metrics(model, x, cam_maps, num_perturbations=10):
 
             with torch.no_grad():
                 # Ensure x_perturbed_single is LongTensor for embedding layer
-                cam_perturbed_single = model.grad_cam(x_perturbed_single.unsqueeze(0).long())[0]
+                x_perturbed_input = x_perturbed_single.unsqueeze(0).long().to(device)
+                cam_perturbed_single = model.grad_cam(x_perturbed_input)[0].to(device)
 
             # Jaccard
             k_orig = min(k_top_features, current_cam_original.numel())
             k_pert = min(k_top_features, cam_perturbed_single.numel())
             if k_orig > 0 and k_pert > 0:
-                _, top_k_orig_indices = torch.topk(current_cam_original, k_orig)
-                _, top_k_pert_indices = torch.topk(cam_perturbed_single, k_pert)
+                _, top_k_orig_indices = torch.topk(current_cam_original.flatten().to(device), k_orig)
+                _, top_k_pert_indices = torch.topk(cam_perturbed_single.flatten().to(device), k_pert)
                 set_orig = set(top_k_orig_indices.cpu().tolist())
                 set_pert = set(top_k_pert_indices.cpu().tolist())
                 intersection = len(set_orig & set_pert)
