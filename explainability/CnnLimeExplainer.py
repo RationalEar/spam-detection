@@ -291,7 +291,7 @@ def compute_auc_insertion(model_wrapper, explanation, text, steps=20, embedding_
     # Create a mapping of tokens to their positions in original text
     # This is a simplified approach; in practice, use proper tokenization
     feature_positions = {}
-    tokens = model_wrapper.tokenizer_spacy(text)
+    tokens = tokenizer_spacy(text)
     for i, token in enumerate(tokens):
         if token not in feature_positions:
             feature_positions[token] = []
@@ -496,7 +496,7 @@ def plot_deletion_insertion_curves(model_wrapper, explanation, text, steps=20):
 
     # Create a mapping of tokens to their positions in original text
     feature_positions = {}
-    tokens = model_wrapper.tokenizer_spacy(text)
+    tokens = tokenizer_spacy(text)
     for i, token in enumerate(tokens):
         if token not in feature_positions:
             feature_positions[token] = []
