@@ -59,11 +59,21 @@ class BertShapExplainer:
             max_length=self.max_length,
             return_tensors='pt'
         )
-        return {
+        
+        # Ensure all tensors are moved to the correct device
+        result = {
             'input_ids': encoded['input_ids'].to(self.device),
-            'attention_mask': encoded['attention_mask'].to(self.device),
-            'token_type_ids': encoded.get('token_type_ids', None)
+            'attention_mask': encoded['attention_mask'].to(self.device)
         }
+        
+        # Handle token_type_ids properly - some tokenizers don't return them
+        if 'token_type_ids' in encoded:
+            result['token_type_ids'] = encoded['token_type_ids'].to(self.device)
+        else:
+            # Create token_type_ids if not present (all zeros for single sentence)
+            result['token_type_ids'] = torch.zeros_like(encoded['input_ids']).to(self.device)
+        
+        return result
 
     def prediction_function(self, texts: Union[List[str], np.ndarray]) -> np.ndarray:
         """
@@ -268,6 +278,8 @@ class BertShapExplainer:
         except Exception as e:
             print(f"Warning: Simplified SHAP computation failed: {e}")
             # Fallback: use feature importance based on word removal
+            # Get baseline prediction (full text) for fallback method
+            baseline_pred = self.prediction_function([text])[0]
             shap_values = []
             
             for i, word in enumerate(words):
