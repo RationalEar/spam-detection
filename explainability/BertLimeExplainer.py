@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import torch
 from typing import List, Dict, Tuple, Callable
 from transformers import BertTokenizer
@@ -429,22 +430,32 @@ class BertLimeExplainer:
             # AUC-Del (lower is better)
             if verbose:
                 print("Computing AUC-Del...")
+            overall_start_time = pd.Timestamp.now()
+            start_time = pd.Timestamp.now()
             metrics['auc_deletion'] = self.compute_auc_deletion(text)
+            metrics['auc_deletion_time'] = (pd.Timestamp.now() - start_time).total_seconds()
             
             # AUC-Ins (higher is better)
             if verbose:
                 print("Computing AUC-Ins...")
+            start_time = pd.Timestamp.now()
             metrics['auc_insertion'] = self.compute_auc_insertion(text)
+            metrics['auc_insertion_time'] = (pd.Timestamp.now() - start_time).total_seconds()
             
             # Comprehensiveness (higher is better)
             if verbose:
                 print("Computing Comprehensiveness...")
+            start_time = pd.Timestamp.now()
             metrics['comprehensiveness'] = self.compute_comprehensiveness(text)
+            metrics['comprehensiveness_time'] = (pd.Timestamp.now() - start_time).total_seconds()
             
             # Jaccard Stability (higher is better)
             if verbose:
                 print("Computing Jaccard Stability...")
+            start_time = pd.Timestamp.now()
             metrics['jaccard_stability'] = self.compute_jaccard_stability(text)
+            metrics['jaccard_stability_time'] = (pd.Timestamp.now() - start_time).total_seconds()
+            metrics['total_time'] = (pd.Timestamp.now() - overall_start_time).total_seconds()
             
             if verbose:
                 print("\n" + "=" * 50)
@@ -454,6 +465,12 @@ class BertLimeExplainer:
                 print(f"AUC-Insertion:    {metrics['auc_insertion']:.4f} (higher is better)")
                 print(f"Comprehensiveness: {metrics['comprehensiveness']:.4f} (higher is better)")
                 print(f"Jaccard Stability: {metrics['jaccard_stability']:.4f} (higher is better)")
+                print("\nTiming Information:")
+                print(f"AUC-Deletion Time: {metrics['auc_deletion_time']:.2f} seconds")
+                print(f"AUC-Insertion Time: {metrics['auc_insertion_time']:.2f} seconds")
+                print(f"Comprehensiveness Time: {metrics['comprehensiveness_time']:.2f} seconds")
+                print(f"Jaccard Stability Time: {metrics['jaccard_stability_time']:.2f} seconds")
+                print(f"Total Time: {metrics['total_time']:.2f} seconds")
                 print("=" * 50)
                 
         except Exception as e:
