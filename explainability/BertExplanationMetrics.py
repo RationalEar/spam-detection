@@ -1,12 +1,10 @@
 import random
-from typing import List, Dict, Tuple, Optional
-import warnings
+from typing import List, Dict, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-from scipy.stats import spearmanr
 from sklearn.metrics import auc
 from transformers import BertTokenizer
 
@@ -50,10 +48,15 @@ class BertExplanationMetrics:
             max_length=max_length,
             return_tensors='pt'
         )
+
+        token_type_ids = encoded.get('token_type_ids', None)
+        if token_type_ids is not None:
+            token_type_ids = token_type_ids.to(self.device)
+
         return {
             'input_ids': encoded['input_ids'].to(self.device),
             'attention_mask': encoded['attention_mask'].to(self.device),
-            'token_type_ids': encoded.get('token_type_ids', None)
+            'token_type_ids': token_type_ids
         }
 
 
