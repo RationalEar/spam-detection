@@ -294,7 +294,7 @@ class BiLSTMAttentionMetrics:
         Returns:
             Average Jaccard similarity (higher is better)
         """
-        # Get original attention weights
+        # Get original attention
         original_attention = self._get_attention_weights(text)
         original_ranking = self._get_token_importance_ranking(text, original_attention)
         original_top_k = set([idx for idx, _ in original_ranking[:k]])
@@ -530,3 +530,268 @@ class BiLSTMAttentionMetrics:
         ham_metrics = metrics_df[metrics_df['true_label'] == 0].mean()
 
         return metrics_df, overall_metrics, spam_metrics, ham_metrics
+
+    def get_top_influential_words(self, text: str, top_k: int = 20) -> List[Dict[str, any]]:
+        """
+        Get top-k most influential words/tokens for a single text using attention weights
+
+        Args:
+            text: Input text
+            top_k: Number of top influential tokens to return
+
+        Returns:
+            List of dictionaries with token info and importance scores
+        """
+        # Get attention weights
+        attention_weights = self._get_attention_weights(text)
+        tokens = text.split()
+
+        # Get token importance ranking
+        token_ranking = self._get_token_importance_ranking(text, attention_weights)
+
+        # Build result list with token information
+        influential_words = []
+        for rank, (token_idx, importance_score) in enumerate(token_ranking[:top_k]):
+            if token_idx < len(tokens):
+                token = tokens[token_idx]
+
+                influential_words.append({
+                    'rank': rank + 1,
+                    'token': token,
+                    'word': token.lower(),
+                    'token_index': token_idx,
+                    'importance_score': importance_score
+                })
+
+        return influential_words[:top_k]
+
+    def analyze_dataset_influential_words(self, texts: List[str], labels: List[int] = None,
+                                        top_k: int = 20, verbose: bool = True) -> Dict[str, any]:
+        """
+        Analyze top influential words across entire dataset using attention weights
+
+        Args:
+            texts: List of input texts
+            labels: Optional list of labels (0=ham, 1=spam)
+            top_k: Number of top words to analyze per text
+            verbose: Whether to print progress
+
+        Returns:
+            Dictionary with comprehensive analysis results
+        """
+        if verbose:
+            print(f"Analyzing {len(texts)} texts for influential words using BiLSTM attention...")
+
+        all_word_scores = {}  # word -> list of scores
+        spam_word_scores = {}  # word -> list of scores (spam only)
+        ham_word_scores = {}   # word -> list of scores (ham only)
+
+        processed_count = 0
+
+        for i, text in enumerate(texts):
+            try:
+                # Skip very short texts
+                if len(text.split()) < 3:
+                    continue
+
+                # Get top influential words for this text
+                influential_words = self.get_top_influential_words(text, top_k)
+
+                # Determine label
+                is_spam = labels[i] == 1 if labels and i < len(labels) else None
+
+                # Aggregate scores
+                for word_info in influential_words:
+                    word = word_info['word'].lower()
+                    score = word_info['importance_score']
+
+                    # Overall scores
+                    if word not in all_word_scores:
+                        all_word_scores[word] = []
+                    all_word_scores[word].append(score)
+
+                    # Label-specific scores
+                    if is_spam is not None:
+                        if is_spam:
+                            if word not in spam_word_scores:
+                                spam_word_scores[word] = []
+                            spam_word_scores[word].append(score)
+                        else:
+                            if word not in ham_word_scores:
+                                ham_word_scores[word] = []
+                            ham_word_scores[word].append(score)
+
+                processed_count += 1
+
+                if verbose and (i + 1) % 10 == 0:
+                    print(f"Processed {i + 1}/{len(texts)} texts...")
+
+            except Exception as e:
+                if verbose:
+                    print(f"Error processing text {i + 1}: {e}")
+                continue
+
+        if verbose:
+            print(f"Successfully processed {processed_count} texts")
+
+        # Calculate aggregated statistics
+        def calculate_word_stats(word_scores_dict):
+            word_stats = []
+            for word, scores in word_scores_dict.items():
+                if len(scores) >= 2:  # Only include words that appear multiple times
+                    word_stats.append({
+                        'word': word,
+                        'frequency': len(scores),
+                        'mean_importance': np.mean(scores),
+                        'std_importance': np.std(scores),
+                        'max_importance': np.max(scores),
+                        'total_importance': np.sum(scores)
+                    })
+
+            # Sort by mean importance
+            word_stats.sort(key=lambda x: x['mean_importance'], reverse=True)
+            return word_stats
+
+        # Calculate statistics for all categories
+        overall_stats = calculate_word_stats(all_word_scores)
+        spam_stats = calculate_word_stats(spam_word_scores) if spam_word_scores else []
+        ham_stats = calculate_word_stats(ham_word_scores) if ham_word_scores else []
+
+        # Find discriminative words (appear more in one class than the other)
+        discriminative_words = []
+        if spam_stats and ham_stats:
+            spam_words = {w['word']: w['mean_importance'] for w in spam_stats}
+            ham_words = {w['word']: w['mean_importance'] for w in ham_stats}
+
+            all_words = set(spam_words.keys()) | set(ham_words.keys())
+
+            for word in all_words:
+                spam_score = spam_words.get(word, 0)
+                ham_score = ham_words.get(word, 0)
+
+                if spam_score > 0 or ham_score > 0:
+                    discriminative_score = spam_score - ham_score
+                    discriminative_words.append({
+                        'word': word,
+                        'spam_importance': spam_score,
+                        'ham_importance': ham_score,
+                        'discriminative_score': discriminative_score,
+                        'category': 'spam_indicator' if discriminative_score > 0 else 'ham_indicator'
+                    })
+
+            discriminative_words.sort(key=lambda x: abs(x['discriminative_score']), reverse=True)
+
+        return {
+            'method': 'bilstm_attention',
+            'total_texts_processed': processed_count,
+            'top_overall_words': overall_stats[:top_k],
+            'top_spam_words': spam_stats[:top_k],
+            'top_ham_words': ham_stats[:top_k],
+            'top_discriminative_words': discriminative_words[:top_k],
+            'statistics': {
+                'total_unique_words': len(all_word_scores),
+                'spam_unique_words': len(spam_word_scores),
+                'ham_unique_words': len(ham_word_scores)
+            }
+        }
+
+    def print_influential_words_analysis(self, analysis_results: Dict[str, any]):
+        """
+        Print formatted analysis results for influential words
+
+        Args:
+            analysis_results: Results from analyze_dataset_influential_words
+        """
+        print("\n" + "=" * 80)
+        print("TOP INFLUENTIAL WORDS ANALYSIS - BiLSTM ATTENTION")
+        print("=" * 80)
+        print(f"Method: {analysis_results['method']}")
+        print(f"Total texts processed: {analysis_results['total_texts_processed']}")
+        print(f"Total unique words found: {analysis_results['statistics']['total_unique_words']}")
+
+        # Overall top words
+        print(f"\n{'='*50}")
+        print("TOP 20 MOST INFLUENTIAL WORDS (OVERALL)")
+        print(f"{'='*50}")
+        print(f"{'Rank':<4} {'Word':<20} {'Frequency':<10} {'Mean Score':<12} {'Max Score':<10}")
+        print("-" * 60)
+
+        for i, word_info in enumerate(analysis_results['top_overall_words'][:20]):
+            print(f"{i+1:<4} {word_info['word']:<20} {word_info['frequency']:<10} "
+                  f"{word_info['mean_importance']:<12.4f} {word_info['max_importance']:<10.4f}")
+
+        # Spam-specific words
+        if analysis_results['top_spam_words']:
+            print(f"\n{'='*50}")
+            print("TOP 20 MOST INFLUENTIAL WORDS (SPAM)")
+            print(f"{'='*50}")
+            print(f"{'Rank':<4} {'Word':<20} {'Frequency':<10} {'Mean Score':<12} {'Max Score':<10}")
+            print("-" * 60)
+
+            for i, word_info in enumerate(analysis_results['top_spam_words'][:20]):
+                print(f"{i+1:<4} {word_info['word']:<20} {word_info['frequency']:<10} "
+                      f"{word_info['mean_importance']:<12.4f} {word_info['max_importance']:<10.4f}")
+
+        # Ham-specific words
+        if analysis_results['top_ham_words']:
+            print(f"\n{'='*50}")
+            print("TOP 20 MOST INFLUENTIAL WORDS (HAM)")
+            print(f"{'='*50}")
+            print(f"{'Rank':<4} {'Word':<20} {'Frequency':<10} {'Mean Score':<12} {'Max Score':<10}")
+            print("-" * 60)
+
+            for i, word_info in enumerate(analysis_results['top_ham_words'][:20]):
+                print(f"{i+1:<4} {word_info['word']:<20} {word_info['frequency']:<10} "
+                      f"{word_info['mean_importance']:<12.4f} {word_info['max_importance']:<10.4f}")
+
+        # Discriminative words
+        if analysis_results['top_discriminative_words']:
+            print(f"\n{'='*50}")
+            print("TOP 20 MOST DISCRIMINATIVE WORDS")
+            print(f"{'='*50}")
+            print(f"{'Rank':<4} {'Word':<20} {'Category':<15} {'Spam Score':<12} {'Ham Score':<11} {'Diff':<8}")
+            print("-" * 75)
+
+            for i, word_info in enumerate(analysis_results['top_discriminative_words'][:20]):
+                print(f"{i+1:<4} {word_info['word']:<20} {word_info['category']:<15} "
+                      f"{word_info['spam_importance']:<12.4f} {word_info['ham_importance']:<11.4f} "
+                      f"{word_info['discriminative_score']:<8.4f}")
+
+        print("\n" + "=" * 80)
+
+
+def analyze_test_dataset_influential_words_bilstm(model, word2idx, idx2word, test_texts: List[str],
+                                                test_labels: List[int] = None, device: str = 'cpu',
+                                                max_len: int = 200, top_k: int = 20):
+    """
+    Standalone function to analyze influential words in test dataset using BiLSTM attention
+
+    Args:
+        model: Trained BiLSTM model
+        word2idx: Word to index mapping
+        idx2word: Index to word mapping
+        test_texts: List of test texts
+        test_labels: Optional list of test labels
+        device: Device to run on
+        max_len: Maximum sequence length
+        top_k: Number of top words to analyze
+
+    Returns:
+        Dictionary with analysis results
+    """
+    print("Initializing BiLSTM attention analyzer...")
+    analyzer = BiLSTMAttentionMetrics(model, word2idx, idx2word, max_len, device)
+
+    print(f"Analyzing top {top_k} influential words using BiLSTM attention...")
+    results = analyzer.analyze_dataset_influential_words(
+        texts=test_texts,
+        labels=test_labels,
+        top_k=top_k,
+        verbose=True
+    )
+
+    # Print formatted results
+    analyzer.print_influential_words_analysis(results)
+
+    return results
+
