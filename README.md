@@ -41,7 +41,7 @@ Choose one of the following methods to run the project:
 
 ### Option 1: Google Colab (A100 GPU) - Recommended for BERT
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/your-username/spam-detection)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/RationalEar/spam-detection)
 
 1. **Set up the environment in Colab:**
     
@@ -183,8 +183,7 @@ If you use this project in your research, please cite:
 
 ## 📞 Support
 
-- 🐛 Issues: [GitHub Issues](https://github.com/your-username/spam-detection/issues)
+- 🐛 Issues: [GitHub Issues](https://github.com/RationalEar/spam-detection/issues)
 
 ---
 
-⭐ **Star this repository if it helped you!**
