@@ -4,6 +4,7 @@ import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import torch
 from scipy.stats import spearmanr
 from sklearn.metrics import auc
@@ -552,7 +553,7 @@ class BertExplanationMetrics:
 
 
     def evaluate_explanation_quality(self, text: str, method: str = 'integrated_gradients',
-                                   verbose: bool = True) -> Dict[str, float]:
+                                   verbose: bool = True, subject: str = None) -> Dict[str, float]:
         """
         Compute all explanation quality metrics for a given text
         
@@ -560,17 +561,22 @@ class BertExplanationMetrics:
             text: Input text
             method: Attribution method ('integrated_gradients' or 'attention')
             verbose: Whether to print detailed results
+            subject: Subject for the evaluation (used in verbose output)
             
         Returns:
             Dictionary containing all metric scores
         """
+        if subject is None:
+            subject = text[:50] if len(text) > 50 else text
+
         if verbose:
-            print(f"Evaluating explanation quality for text: '{text[:50]}...'" if len(text) > 50 else f"Evaluating explanation quality for text: '{text}'")
+            print(f"Evaluating explanation quality for text: '{subject}'")
             print(f"Using method: {method}")
         
         metrics = {}
         
         try:
+            start_time = pd.Timestamp.now()
             # AUC-Del (lower is better)
             if verbose:
                 print("Computing AUC-Del...")
@@ -590,6 +596,9 @@ class BertExplanationMetrics:
             if verbose:
                 print("Computing Jaccard Stability...")
             metrics['jaccard_stability'] = self.compute_jaccard_stability(text, method)
+            end_time = pd.Timestamp.now()
+            computation_time = end_time - start_time
+            metrics['computation_time'] = computation_time
             
             if verbose:
                 print("\n" + "=" * 50)
@@ -600,6 +609,7 @@ class BertExplanationMetrics:
                 print(f"AUC-Insertion:    {metrics['auc_insertion']:.4f} (higher is better)")
                 print(f"Comprehensiveness: {metrics['comprehensiveness']:.4f} (higher is better)")
                 print(f"Jaccard Stability: {metrics['jaccard_stability']:.4f} (higher is better)")
+                print(f"Computation Time: {computation_time}")
                 print("=" * 50)
                 
         except Exception as e:
