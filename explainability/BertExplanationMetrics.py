@@ -1,11 +1,10 @@
 import random
-from typing import List, Dict, Tuple, Optional
-import warnings
+from typing import List, Dict, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import torch
-from scipy.stats import spearmanr
 from sklearn.metrics import auc
 from transformers import BertTokenizer
 
@@ -49,10 +48,15 @@ class BertExplanationMetrics:
             max_length=max_length,
             return_tensors='pt'
         )
+
+        token_type_ids = encoded.get('token_type_ids', None)
+        if token_type_ids is not None:
+            token_type_ids = token_type_ids.to(self.device)
+
         return {
             'input_ids': encoded['input_ids'].to(self.device),
             'attention_mask': encoded['attention_mask'].to(self.device),
-            'token_type_ids': encoded.get('token_type_ids', None)
+            'token_type_ids': token_type_ids
         }
 
 
@@ -552,7 +556,7 @@ class BertExplanationMetrics:
 
 
     def evaluate_explanation_quality(self, text: str, method: str = 'integrated_gradients',
-                                   verbose: bool = True) -> Dict[str, float]:
+                                   verbose: bool = True, subject: str = None) -> Dict[str, float]:
         """
         Compute all explanation quality metrics for a given text
         
@@ -560,17 +564,22 @@ class BertExplanationMetrics:
             text: Input text
             method: Attribution method ('integrated_gradients' or 'attention')
             verbose: Whether to print detailed results
+            subject: Subject for the evaluation (used in verbose output)
             
         Returns:
             Dictionary containing all metric scores
         """
+        if subject is None:
+            subject = text[:50] if len(text) > 50 else text
+
         if verbose:
-            print(f"Evaluating explanation quality for text: '{text[:50]}...'" if len(text) > 50 else f"Evaluating explanation quality for text: '{text}'")
+            print(f"Evaluating explanation quality for text: '{subject}'")
             print(f"Using method: {method}")
         
         metrics = {}
         
         try:
+            start_time = pd.Timestamp.now()
             # AUC-Del (lower is better)
             if verbose:
                 print("Computing AUC-Del...")
@@ -590,6 +599,9 @@ class BertExplanationMetrics:
             if verbose:
                 print("Computing Jaccard Stability...")
             metrics['jaccard_stability'] = self.compute_jaccard_stability(text, method)
+            end_time = pd.Timestamp.now()
+            computation_time = end_time - start_time
+            metrics['computation_time'] = computation_time
             
             if verbose:
                 print("\n" + "=" * 50)
@@ -600,6 +612,7 @@ class BertExplanationMetrics:
                 print(f"AUC-Insertion:    {metrics['auc_insertion']:.4f} (higher is better)")
                 print(f"Comprehensiveness: {metrics['comprehensiveness']:.4f} (higher is better)")
                 print(f"Jaccard Stability: {metrics['jaccard_stability']:.4f} (higher is better)")
+                print(f"Computation Time: {computation_time}")
                 print("=" * 50)
                 
         except Exception as e:
@@ -741,6 +754,260 @@ class BertExplanationMetrics:
         plt.show()
 
 
+    def get_top_influential_words(self, text: str, top_k: int = 20, method: str = 'integrated_gradients') -> List[Dict[str, any]]:
+        """
+        Get top-k most influential words/tokens for a single text
+
+        Args:
+            text: Input text
+            top_k: Number of top influential tokens to return
+            method: Attribution method ('integrated_gradients' or 'attention')
+
+        Returns:
+            List of dictionaries with token info and importance scores
+        """
+        encoded = self._tokenize_text(text)
+
+        # Get attribution scores
+        if method == 'integrated_gradients':
+            attributions, _ = self._get_integrated_gradients(text)
+            token_ranking = self._get_token_importance_ranking(
+                attributions, encoded['attention_mask'], absolute=True
+            )
+        elif method == 'attention':
+            attention_weights = self._get_attention_weights(text)
+            if not attention_weights:
+                return []
+            last_layer_key = list(attention_weights.keys())[-1]
+            avg_attention = attention_weights[last_layer_key].mean(dim=1).squeeze(0)
+            token_ranking = self._get_token_importance_ranking(
+                avg_attention, encoded['attention_mask'], absolute=True
+            )
+        else:
+            raise ValueError(f"Unknown method: {method}")
+
+        # Get tokens from input_ids
+        tokens = self.tokenizer.convert_ids_to_tokens(encoded['input_ids'].squeeze(0))
+
+        # Build result list with token information
+        influential_words = []
+        for rank, (token_idx, importance_score) in enumerate(token_ranking[:top_k]):
+            if token_idx < len(tokens):
+                token = tokens[token_idx]
+
+                # Skip special tokens
+                if token in ['[CLS]', '[SEP]', '[PAD]']:
+                    continue
+
+                # Clean up wordpiece tokens
+                word = token.replace('##', '')
+
+                influential_words.append({
+                    'rank': rank + 1,
+                    'token': token,
+                    'word': word,
+                    'token_index': token_idx,
+                    'importance_score': importance_score,
+                    'is_subword': token.startswith('##')
+                })
+
+        return influential_words[:top_k]
+
+
+    def analyze_dataset_influential_words(self, texts: List[str], labels: List[int] = None,
+                                        top_k: int = 20, method: str = 'integrated_gradients',
+                                        verbose: bool = True) -> Dict[str, any]:
+        """
+        Analyze top influential words across entire dataset
+
+        Args:
+            texts: List of input texts
+            labels: Optional list of labels (0=ham, 1=spam)
+            top_k: Number of top words to analyze per text
+            method: Attribution method to use
+            verbose: Whether to print progress
+
+        Returns:
+            Dictionary with comprehensive analysis results
+        """
+        if verbose:
+            print(f"Analyzing {len(texts)} texts for influential words using {method}...")
+
+        all_word_scores = {}  # word -> list of scores
+        spam_word_scores = {}  # word -> list of scores (spam only)
+        ham_word_scores = {}   # word -> list of scores (ham only)
+
+        processed_count = 0
+
+        for i, text in enumerate(texts):
+            try:
+                # Get top influential words for this text
+                influential_words = self.get_top_influential_words(text, top_k, method)
+
+                # Determine label
+                is_spam = labels[i] == 1 if labels and i < len(labels) else None
+
+                # Aggregate scores
+                for word_info in influential_words:
+                    word = word_info['word'].lower()
+                    score = word_info['importance_score']
+
+                    # Overall scores
+                    if word not in all_word_scores:
+                        all_word_scores[word] = []
+                    all_word_scores[word].append(score)
+
+                    # Label-specific scores
+                    if is_spam is not None:
+                        if is_spam:
+                            if word not in spam_word_scores:
+                                spam_word_scores[word] = []
+                            spam_word_scores[word].append(score)
+                        else:
+                            if word not in ham_word_scores:
+                                ham_word_scores[word] = []
+                            ham_word_scores[word].append(score)
+
+                processed_count += 1
+
+                if verbose and (i + 1) % 10 == 0:
+                    print(f"Processed {i + 1}/{len(texts)} texts...")
+
+            except Exception as e:
+                if verbose:
+                    print(f"Error processing text {i + 1}: {e}")
+                continue
+
+        if verbose:
+            print(f"Successfully processed {processed_count} texts")
+
+        # Calculate aggregated statistics
+        def calculate_word_stats(word_scores_dict):
+            word_stats = []
+            for word, scores in word_scores_dict.items():
+                if len(scores) >= 2:  # Only include words that appear multiple times
+                    word_stats.append({
+                        'word': word,
+                        'frequency': len(scores),
+                        'mean_importance': np.mean(scores),
+                        'std_importance': np.std(scores),
+                        'max_importance': np.max(scores),
+                        'total_importance': np.sum(scores)
+                    })
+
+            # Sort by mean importance
+            word_stats.sort(key=lambda x: x['mean_importance'], reverse=True)
+            return word_stats
+
+        # Calculate statistics for all categories
+        overall_stats = calculate_word_stats(all_word_scores)
+        spam_stats = calculate_word_stats(spam_word_scores) if spam_word_scores else []
+        ham_stats = calculate_word_stats(ham_word_scores) if ham_word_scores else []
+
+        # Find discriminative words (appear more in one class than the other)
+        discriminative_words = []
+        if spam_stats and ham_stats:
+            spam_words = {w['word']: w['mean_importance'] for w in spam_stats}
+            ham_words = {w['word']: w['mean_importance'] for w in ham_stats}
+
+            all_words = set(spam_words.keys()) | set(ham_words.keys())
+
+            for word in all_words:
+                spam_score = spam_words.get(word, 0)
+                ham_score = ham_words.get(word, 0)
+
+                if spam_score > 0 or ham_score > 0:
+                    discriminative_score = spam_score - ham_score
+                    discriminative_words.append({
+                        'word': word,
+                        'spam_importance': spam_score,
+                        'ham_importance': ham_score,
+                        'discriminative_score': discriminative_score,
+                        'category': 'spam_indicator' if discriminative_score > 0 else 'ham_indicator'
+                    })
+
+            discriminative_words.sort(key=lambda x: abs(x['discriminative_score']), reverse=True)
+
+        return {
+            'method': method,
+            'total_texts_processed': processed_count,
+            'top_overall_words': overall_stats[:top_k],
+            'top_spam_words': spam_stats[:top_k],
+            'top_ham_words': ham_stats[:top_k],
+            'top_discriminative_words': discriminative_words[:top_k],
+            'statistics': {
+                'total_unique_words': len(all_word_scores),
+                'spam_unique_words': len(spam_word_scores),
+                'ham_unique_words': len(ham_word_scores)
+            }
+        }
+
+
+    def print_influential_words_analysis(self, analysis_results: Dict[str, any]):
+        """
+        Print formatted analysis results for influential words
+
+        Args:
+            analysis_results: Results from analyze_dataset_influential_words
+        """
+        print("\n" + "=" * 80)
+        print("TOP INFLUENTIAL WORDS ANALYSIS")
+        print("=" * 80)
+        print(f"Method: {analysis_results['method']}")
+        print(f"Total texts processed: {analysis_results['total_texts_processed']}")
+        print(f"Total unique words found: {analysis_results['statistics']['total_unique_words']}")
+
+        # Overall top words
+        print(f"\n{'='*50}")
+        print("TOP 20 MOST INFLUENTIAL WORDS (OVERALL)")
+        print(f"{'='*50}")
+        print(f"{'Rank':<4} {'Word':<20} {'Frequency':<10} {'Mean Score':<12} {'Max Score':<10}")
+        print("-" * 60)
+
+        for i, word_info in enumerate(analysis_results['top_overall_words'][:20]):
+            print(f"{i+1:<4} {word_info['word']:<20} {word_info['frequency']:<10} "
+                  f"{word_info['mean_importance']:<12.4f} {word_info['max_importance']:<10.4f}")
+
+        # Spam-specific words
+        if analysis_results['top_spam_words']:
+            print(f"\n{'='*50}")
+            print("TOP 20 MOST INFLUENTIAL WORDS (SPAM)")
+            print(f"{'='*50}")
+            print(f"{'Rank':<4} {'Word':<20} {'Frequency':<10} {'Mean Score':<12} {'Max Score':<10}")
+            print("-" * 60)
+
+            for i, word_info in enumerate(analysis_results['top_spam_words'][:20]):
+                print(f"{i+1:<4} {word_info['word']:<20} {word_info['frequency']:<10} "
+                      f"{word_info['mean_importance']:<12.4f} {word_info['max_importance']:<10.4f}")
+
+        # Ham-specific words
+        if analysis_results['top_ham_words']:
+            print(f"\n{'='*50}")
+            print("TOP 20 MOST INFLUENTIAL WORDS (HAM)")
+            print(f"{'='*50}")
+            print(f"{'Rank':<4} {'Word':<20} {'Frequency':<10} {'Mean Score':<12} {'Max Score':<10}")
+            print("-" * 60)
+
+            for i, word_info in enumerate(analysis_results['top_ham_words'][:20]):
+                print(f"{i+1:<4} {word_info['word']:<20} {word_info['frequency']:<10} "
+                      f"{word_info['mean_importance']:<12.4f} {word_info['max_importance']:<10.4f}")
+
+        # Discriminative words
+        if analysis_results['top_discriminative_words']:
+            print(f"\n{'='*50}")
+            print("TOP 20 MOST DISCRIMINATIVE WORDS")
+            print(f"{'='*50}")
+            print(f"{'Rank':<4} {'Word':<20} {'Category':<15} {'Spam Score':<12} {'Ham Score':<11} {'Diff':<8}")
+            print("-" * 75)
+
+            for i, word_info in enumerate(analysis_results['top_discriminative_words'][:20]):
+                print(f"{i+1:<4} {word_info['word']:<20} {word_info['category']:<15} "
+                      f"{word_info['spam_importance']:<12.4f} {word_info['ham_importance']:<11.4f} "
+                      f"{word_info['discriminative_score']:<8.4f}")
+
+        print("\n" + "=" * 80)
+
+
 def demonstrate_bert_quality_metrics(model, tokenizer, test_text: str, device: str = 'cpu'):
     """
     Demonstrate how to use the BERT explanation quality metrics
@@ -768,3 +1035,40 @@ def demonstrate_bert_quality_metrics(model, tokenizer, test_text: str, device: s
         'integrated_gradients': ig_metrics,
         'attention': attention_metrics
     }
+
+
+def analyze_test_dataset_influential_words(model, tokenizer, test_texts: List[str],
+                                         test_labels: List[int] = None, device: str = 'cpu',
+                                         top_k: int = 20, method: str = 'integrated_gradients'):
+    """
+    Standalone function to analyze influential words in test dataset
+
+    Args:
+        model: Trained SpamBERT model
+        tokenizer: BERT tokenizer
+        test_texts: List of test texts
+        test_labels: Optional list of test labels
+        device: Device to run on
+        top_k: Number of top words to analyze
+        method: Attribution method to use
+
+    Returns:
+        Dictionary with analysis results
+    """
+    print("Initializing BERT explanation analyzer...")
+    analyzer = BertExplanationMetrics(model, tokenizer, device)
+
+    print(f"Analyzing top {top_k} influential words using {method}...")
+    results = analyzer.analyze_dataset_influential_words(
+        texts=test_texts,
+        labels=test_labels,
+        top_k=top_k,
+        method=method,
+        verbose=True
+    )
+
+    # Print formatted results
+    analyzer.print_influential_words_analysis(results)
+
+    return results
+
